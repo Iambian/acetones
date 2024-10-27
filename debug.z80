@@ -4,7 +4,7 @@
 
 ;You must assign a print character routine.
 ;You must also write all opcode bytes to operbuf or map operbuf to where written
-dbg_printChr    = PutC
+dbg_printChr    = PrintBigFont
 operbuf         = $D00000
 
 dbg_printDisassembly:
@@ -13,7 +13,7 @@ dbg_printDisassembly:
     ld  a,(operbuf)
     ld  L,a
     ld  H,4
-    mul hl
+    mlt hl
     ld  de,inst6502_disassembly_table
     add hl,de
     ;print static entry in disassembly table
@@ -50,7 +50,7 @@ _:  cp  a,'2'
     jr  nz,+_
     call dbg_printOperand2
     jr  dbg_printDisassembly_printOperandLoop
-    push bc
+_:  push bc
         push hl
             call dbg_printChr
         pop hl
