@@ -1,0 +1,112 @@
+;This has all the tables needed to drive the debugger.
+#include "debug_itab.z80"
+
+
+;You must assign a print character routine.
+;You must also write all opcode bytes to operbuf or map operbuf to where written
+dbg_printChr    = PutC
+operbuf         = $D00000
+
+dbg_printDisassembly:
+    push af \ push bc \ push de \ push hl \ push ix
+    ;find entry in disassembly table
+    ld  a,(operbuf)
+    ld  L,a
+    ld  H,4
+    mul hl
+    ld  de,inst6502_disassembly_table
+    add hl,de
+    ;print static entry in disassembly table
+    ld  b,3
+_:  push bc
+        ld  a,(hl)
+        inc hl
+        push hl
+            call dbg_printChr
+        pop hl
+    pop bc
+    djnz -_
+    ;retrieve type data then iterate over disassembler table until type found
+    ld  b,(hl)
+    inc b   ;we want to count the 0th entry as well for the djnz to work.
+    ld  hl,inst6502_disassembler
+    ld  de,0
+_:  ld  e,(hl)
+    add hl,hl
+    djnz -_
+    dec e   ;if entry is zero-sized (itself-1), nothing to write
+    jr  z,dbg_printDisassembly_end
+    ;advance to formatted text. Print operand data
+    inc hl
+    ld  b,e
+dbg_printDisassembly_printOperandLoop:
+    ld  a,(hl)
+    inc hl
+    cp  a,'1'
+    jr  nz,+_
+    call dbg_printOperand1
+    jr  dbg_printDisassembly_printOperandLoop
+_:  cp  a,'2'
+    jr  nz,+_
+    call dbg_printOperand2
+    jr  dbg_printDisassembly_printOperandLoop
+    push bc
+        push hl
+            call dbg_printChr
+        pop hl
+    pop bc
+    djnz dbg_printDisassembly_printOperandLoop
+dbg_printDisassembly_end:
+    pop ix \ pop hl \ pop de \ pop bc \ pop af
+    ret
+
+dbg_printOperand2:
+    call dbg_printOperand1
+    ld  a,(operbuf+2)
+    jr  dbg_printHex
+dbg_printOperand1:
+    ld  a,(operbuf+1)
+dbg_printHex:
+    push bc 
+        push hl
+            push af
+                and a,$F0
+                rlca
+                rlca
+                rlca
+                rlca
+                add a,'0'
+                call dbg_printChr
+            pop af
+            and a,$0F
+            add a,'0'
+            call dbg_printChr
+        pop hl
+    pop bc
+    ret
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

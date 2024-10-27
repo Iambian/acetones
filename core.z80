@@ -1,0 +1,3635 @@
+
+#define ADDCYC(x) nop
+#define PUSHPCPLUS2() nop
+#define REGA ix+0
+#define REGX ix+1
+#define REGY ix+2
+#define REGSP ix+3
+#define REGSR ix+4
+#define REGPC ix+5
+#define CYCLES_REMAIN (ix+8)
+#define SF_NEG 7
+#define SF_OVER 6 
+#define SF_RESERVED 5 
+#define SF_BRK 4
+#define SF_DEC 3
+#define SF_INT 2
+#define SF_ZERO 1
+#define SF_CARRY 0
+
+;CHANGE THESE LATER
+#define BASETABLE $800000
+#define BASETABLE_STRIDE 8
+#define PAGETABLE_OFFSET 0
+#define PAGETABLE 0+(BASETABLE+PAGETABLE_OFFSET)
+#define JUMPTABLE_OFFSET 4
+#define JUMPTABLE 0+(BASETABLE+JUMPTABLE_OFFSET)
+;ALSO CHANGE THIS
+#define ZEROPAGE     $810000
+#define STACKBASE    $810100
+#define INTERNALVARS $810200
+
+;TODO: DEFINE MEMORY ACCESS MACROS. ONE OR MORE FOR READ AND WRITE.
+;FIGURE OUT HOW TO GET BOTH HIGH AND LOW BYTE OF ORIGINAL ADDRESS
+;AND PERFORM ALTERNATE ACTIONS BASED ON WHAT HARDWARE WAS ACCESSED.
+;NOTE: PATTERN SHOWS THAT D=MSB, C=LSB OF 6502 ADDRESS. USE THIS.
+;
+;THESE MACROS ARE PLACEHOLDERS. CHANGE THEM LATER ON TO REFLECT ACTUAL
+;HARDWARE SHENANIGANS.
+;
+;NOTE: WRITE ACCESSES RELY ON KNOWING WHAT DATA TO WRITE. CAN'T STORE THAT IN A
+;      SINCE WE NEED TO DO CONDITIONING. REGISTER B IS UNUSED SO LET'S USE THAT.
+;
+#define READ_ACCESS ld a,(hl)
+#define WRITE_ACCESS ld (hl),b
+;Later, put in actual test. Z if not triggered, NZ if triggered. This
+;alters the behavior of the BRK instruction.
+#define WAS_NMI_TRIGGERED or  a
+
+#define OPRFLG_C res SF_CARRY,b \ jr nc,$+4 \ set SF_CARRY,b
+#define OPRFLG_V res SF_OVER,b \ jp po,$+5 \ set SF_OVER,b
+#define OPRFLG_Z res SF_ZERO,b \ jr z,$+4 \ set SF_ZERO,b
+#define OPRFLG_N res SF_NEG,b \ jr nc,$+4 \ set SF_NEG,b
+
+#define FLAGS_ZN ld b,(REGSR) \ add a,a \ OPRFLG_Z \ OPRFLG_N \ ld (REGSR),b
+#define FLAGS_CZN ld b,(REGSR) \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (REGSR),b
+#define FLAGS_VCZN ld b,(REGSR) \ OPRFLG_V \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (REGSR),b
+
+
+;Modify later to include provisions for hardware i/o based on page
+#define HW_READ(src_reg) ld a,(src_reg)
+#define HW_WRITE(dst_reg) ld (dst_reg),a
+
+;Has no inputs thus yet.
+;Figure out a way to add ROM mappings and somesuch. Externally or whatnot.
+start6502Interpreter:
+    ;initialize register memory
+    ld  ix,INTERNALVARS
+    lea de,ix+0
+    lea hl,ix+1
+    ld  bc,127
+    ldir
+    ;
+    GET_ADDRESS_FROM_PC
+    ;
+
+
+i6502FirstLoad:
+    ld.s de,(REGPC)
+    ld  a,e
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)     ;get address to current page's base
+    ld  d,0
+    ld  e,a
+    add hl,de       ;resolve final address
+    jr  i6502FinishLoad
+i6502NextLoad:
+    inc hl
+    inc e
+    jr  nz,i6502FinishLoad
+    ld  d,(REGPC+1)
+    inc d
+    ld.s (REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)     ;get address to current page's base
+    ld  e,0         ;PCL known to be zero at this point.
+i6502FinishLoad:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,i6502PrepNextPage
+    ld  d,(REGPC+1)
+    inc d
+    ld.s (REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+    ld  e,0
+i6502PrepNextPage:
+    push hl
+        ld  h,a
+        ld  l,BASETABLE_STRIDE
+        mul hl
+        ld  bc,JUMPTABLE
+        add hl,bc
+        ld  hl,(hl)     ;jumptable
+        ex  hl,(sp)     ;exch with exec addr, jumpto-via-ret
+    ret
+;Instructions one byte wide returns to the main loop via:
+;   JP i6502FinishLoad
+;Those with parameters have HL at the address in quetion, and is expected to
+;advance HL and E at the end of the instruction. You return to main loop via:
+;   JP i6502NextLoad
+;Unless you manually advance the pointer to the next instruction.
+;You really shouldn't but if you must do that, then also do this:
+;   JP i6502FinishLoad
+;Remember that register E is very important; it tells you about page boundaries.
+
+;Now...
+;   You get to consider how to code for all available addressing modes.
+;   Lucky you! You get to have so much fun trying to bend your own mind
+;   into teeny tiny pretzels. Thankfully, we already did much of the
+;   thinkering. Oh. Also pay attention to instruction timings! Those paging
+;   thingamabobbers won't count themselves, ya hear!
+
+
+;absolute	JMP oper	4C	3	3  
+inst6052_jmp_abs:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  d,(REGPC+1)
+    inc d
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+_:  ld  (REGPC+0),a
+    ld  a,(hl)
+    ld  (REGPC+1),a
+    ADDCYC(3)
+    jp i6502FirstLoad
+
+
+;Note: In earlier 6502 implementations, cross-page reads on indirect is bugged.
+;   The end effect would be that inst6502_jmp_indir_splitread would wrap around
+;   to the start of the current page rather than try to read the next page.
+;indirect	JMP (oper)	6C	3	5  
+inst6502_jmp_indir:
+    ADDCYC(5)
+    ld  e,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  b,(REGPC+1)
+    inc b
+    ld  c,BASETABLE_STRIDE
+    mul bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+_:  ld  d,(hl)  ;new 6502 address to read from is loaded from memory
+    inc e
+    jr  z,inst6502_jmp_indir_splitread
+    dec e
+    ld  c,e
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+    ld  d,0
+    ld  e,c
+    add hl,de   ;full real address reconstructed.
+    ld.s de,(hl)
+    ld.s (REGPC),de
+    jp  i6502FirstLoad
+inst6502_jmp_indir_splitread:
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  de,(hl) ;
+    ex  de,hl
+    ld  bc,255
+    add hl,bc
+    ld  a,(hl)  ;first byte at indirect loaded
+    ex  de,hl
+    ld  c,BASETABLE_STRIDE  ;yeee
+    add hl,bc   ;get next page from table w/o need to mul again.
+    ld  e,(hl)
+    ld  d,a
+    ld.s (REGPC),de
+    jp  i6502FirstLoad
+
+;absolute	JSR oper	20	3	6  
+inst6502_jsr:
+    ld  d,(REGPC+1)
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    inc d
+    ld  a,d
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+    ld  d,a
+_:  ld  b,(hl)
+    ;push de to 6502stack
+    ld  hl,STACKBASE
+    ld  l,(REGSP)
+    ld  (hl),d
+    dec l
+    ld  (hl),e
+    dec l
+    ld  (REGSP),l
+    ld.s (REGPC),bc
+    ADDCYC(6)
+    jp  i6502FirstLoad
+
+;implied	RTS	60	1	6
+inst6502_rts:
+    ld  hl,STACKBASE
+    ld  l,(REGSP)
+    inc l
+    ld  e,(hl)
+    inc l
+    ld  d,(hl)
+    ld  (REGSP),l
+    ld.s (REGPC),de
+    ADDCYC(6)
+    jp  i6502FirstLoad
+;-----------------------------------------------------------------------------    
+;-----------------------------------------------------------------------------    
+
+;    ***   *   *  *****  *      *****  **  *  ***** 
+;   *   *  *   *    *    *        *    **  *  *     
+;   *   *  *   *    *    *        *    * * *  ***   
+;   *   *  *   *    *    *        *    *  **  *     
+;    ***    ***     *    *****  *****  *  **  ***** 
+
+;-----------------------------------------------------------------------------    
+;-----------------------------------------------------------------------------    
+outline6502_imm:
+    ld  a,(hl)  ;oper uses A
+    ;oper
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502NextLoad
+
+outline6502_abs:
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr nz,+_
+    ld  d,(REGPC+1)
+    inc d
+    ld.s (REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl) ;
+    ld  e,0
+_:  ld  b,(hl)
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
+        ld  a,(hl)  ;oper uses A
+        ;oper
+    FLAGS_ZN
+    ADDCYC(3)
+    pop hl
+    jp i6502NextLoad
+
+outline6502_zeropage:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)      ;oper uses A
+    ;HARDWARE ACCESS PAGING NOT ALLOWED. NO HARDWARE INTERACTS WITH PAGE ZERO.
+    ;oper
+    FLAGS_ZN
+    ADDCYC(3)
+    jp i6502NextLoad
+
+
+;Note: has same split start as abs
+outline6502_abs_idx_x:  ;INDEXED WITH X. INDEX WITH Y VARIATION EXISTS. CAREFUL.
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr nz,+_
+    ld  d,(REGPC+1)
+    inc d
+    ld.s (REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl) ;
+    ld  e,0
+_:  ld  b,(hl)
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        ld  a,(REGX)        ;REPLACE WITH REGY WHEN INSTRUCTION CALLS FOR IT
+        add a,c
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
+        add hl,bc   ;full address
+        ld  a,(hl)  ;oper uses A
+        ;oper
+    FLAGS_ZN
+    ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+
+outline6502_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)      ;oper uses A
+    ;HARDWARE PAGING NOT ALLOWED. HARDWARE DOES NOT INTERACT WITH PAGE ZERO
+    ;oper
+    FLAGS_ZN
+    ADDCYC(4)
+    jp i6502NextLoad
+    
+outline6502_zpy:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGY)
+    ld  c,a
+    ld  a,(bc)      ;oper uses A
+    ;HARDWARE PAGING NOT ALLOWED. HARDWARE DOES NOT INTERACT WITH PAGE ZERO
+    ;oper
+    FLAGS_ZN
+    ADDCYC(4)
+    jp i6502NextLoad
+
+outline6502_preidx_indir:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
+        ld  a,(hl)  ;oper uses A.
+        ;oper
+        FLAGS_ZN
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+outline6502_postidx_indir:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        ADDCYC(1)
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        ld  a,(hl)
+        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
+        ;oper
+        FLAGS_ZN
+        ADDCYC(5)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+
+;  ***  *   * ****  ****   ***  *   * ***** ***** **  * *****  ***  
+; *     *   * *   * *   * *   * *   *   *     *   **  * *     *     
+;  ***  *   * ****  ****  *   * *   *   *     *   * * * ***    ***  
+;     * *   * *   * *   * *   * *   *   *     *   *  ** *         * 
+;  ***   ***  ****  *   *  ***   ***    *   ***** *  ** *****  ***  
+
+;-----------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+subroutine6502_abs_split_start:
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr nz,+_
+    ld  d,(REGPC+1)
+    inc d
+    ld.s (REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mul de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl) ;
+    ld  e,0
+_:  ld  b,(hl)
+    ret
+
+subroutine6502_adc_combined_end:
+    ld  a,(REGSR)   ;flags register
+    rra             ;gets b0 (6502 carry) into (Z80) carry flag.
+    ld  a,(REGA)
+    adc a,c
+    ld  (REGA),a
+    FLAGS_VCZN
+    jp i6502NextLoad
+
+subroutine6502_sbc_combined_end:
+    ld  a,(REGSR)   ;flags register
+    rra             ;gets b0 (6502 carry) into (Z80) carry flag.
+    ld  a,(REGA)
+    ccf
+    sbc a,c
+    ccf
+    ld  (REGA),a
+    FLAGS_VCZN
+    jp i6502NextLoad
+
+subroutine6502_cmp_combined_end:
+    ld  a,(REGA)
+    cp  b
+    FLAGS_CZN
+    jp i6502NextLoad
+
+subroutine6502_take_branch:
+    ADDCYC(1)
+    ld  a,(hl)  ;offset byte
+    ld  L,a
+    add a,a
+    sbc a,a
+    ld  H,a     ;sign-extending offset byte
+    ld  d,(REGPC+1)
+    inc de
+    add.s hl,de
+    ld  a,h
+    cp  d       ;is high byte the same?
+    jr  z,+_    ;if so, do not add another clock
+    ADDCYC(1)
+_:  ld.s (REGPC),hl
+    jp  i6502FirstLoad
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Transfer Instructions
+;LDA - Load Accumulator with Memory
+;    M -> A
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+
+;addressing	assembler	opc	bytes	cycles
+;immediate	LDA #oper	A9	2	2
+inst6502_lda_imm:
+    ld  a,(hl)
+    ld  (REGA),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502NextLoad
+
+;zeropage	LDA oper	A5	2	3
+inst6502_lda_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGA),a
+    FLAGS_ZN
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,X	LDA oper,X	B5	2	4 
+inst6502_lda_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGA),a
+    FLAGS_ZN
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	LDA oper	AD	3	4
+inst6502_lda_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGA),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,X	LDA oper,X	BD	3	4* 
+inst6502_lda_absx:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGA),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,Y	LDA oper,Y	B9	3	4* 
+inst6502_lda_absy:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGA),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	LDA (oper,X)	A1	2	6
+inst6502_lda_indx:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        ld (REGA),a
+        FLAGS_ZN
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+;(indirect),Y	LDA (oper),Y	B1	2	5*
+inst6502_lda_indy:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        ADDCYC(1)
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        ld  (REGA),a
+        FLAGS_ZN
+        ADDCYC(5)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;LDX - Load Index X with Memory
+;    M -> X
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+
+;immediate	LDX #oper	A2	2	2  
+inst6502_ldx_imm:
+    ld  a,(hl)
+    ld  (REGX),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502NextLoad
+
+;zeropage	LDX oper	A6	2	3 
+inst6502_ldx_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGX),a
+    FLAGS_ZN
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,Y	LDX oper,Y	B6	2	4  
+inst6502_ldx_zpy:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGY)
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGX),a
+    FLAGS_ZN
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	LDX oper	AE	3	4  
+inst6502_ldx_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGX),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,Y	LDX oper,Y	BE	3	4* 
+inst6502_ldx_absy:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGX),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;LDY -  Load Index Y with Memory
+;    M -> Y
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+
+;immediate	LDY #oper	A0	2	2  
+inst6502_ldy_imm:
+    ld  a,(hl)
+    ld  (REGY),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502NextLoad
+
+;zeropage	LDY oper	A4	2	3  
+inst6502_ldy_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGY),a
+    FLAGS_ZN
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,X	LDY oper,X	B4	2	4  
+inst6502_ldy_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    ld  (REGY),a
+    FLAGS_ZN
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	LDY oper	AC	3	4  
+inst6502_ldy_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGY),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,X	LDY oper,X	BC	3	4* 
+inst6502_ldy_absx:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        ld (REGY),a
+        FLAGS_ZN
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;STA - Store Accumulator in Memory
+;    A -> M
+;    N	Z	C	I	D	V
+;    -	-	-	-	-	-
+
+;zeropage	STA oper	85	2	3  
+inst6502_sta_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(REGA)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,X	STA oper,X	95	2	4  
+inst6502_sta_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(REGA)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	STA oper	8D	3	4
+inst6502_sta_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        ld  b,(REGA)
+        WRITE_ACCESS
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,X	STA oper,X	9D	3	5  
+inst6502_sta_absx:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        ld  b,(REGA)
+        WRITE_ACCESS
+        ADDCYC(5)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,Y	STA oper,Y	99	3	5  
+inst6502_sta_absy:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        ld  b,(REGA)
+        WRITE_ACCESS
+        ADDCYC(5)
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	STA (oper,X)	81	2	6  
+inst6502_sta_indx:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        ld  b,(REGA)
+        WRITE_ACCESS
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+;(indirect),Y	STA (oper),Y	91	2	6  
+inst6502_sta_indy:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        ld  b,(REGA)
+        WRITE_ACCESS
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;STX - Store Index X in Memory
+;    X -> M
+;    N	Z	C	I	D	V
+;    -	-	-	-	-	-
+
+;zeropage	STX oper	86	2	3  
+inst6502_stx_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(REGX)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,Y	STX oper,Y	96	2	4  
+inst6502_stx_zpy:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGY)
+    ld  c,a
+    ld  a,(REGX)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	STX oper	8E	3	4  
+inst6502_stx_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        ld  b,(REGX)
+        WRITE_ACCESS
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;STY - Store Index Y in Memory
+;    Y -> M
+;    N	Z	C	I	D	V
+;    -	-	-	-	-	-
+
+;zeropage	STY oper	84	2	3  
+inst6502_sty_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(REGY)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(3)
+    jp i6502NextLoad
+
+;zeropage,X	STY oper,X	94	2	4  
+inst6502_sty_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(REGY)
+    ld  (bc),a      ;Zeropage access is not hardware-gated
+    ADDCYC(4)
+    jp i6502NextLoad
+
+;absolute	STY oper	8C	3	4  
+inst6502_sty_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        ld  b,(REGY)
+        WRITE_ACCESS
+        ADDCYC(4)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;TAX - Transfer Accumulator to Index X [A -> X]
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;implied	TAX	AA	1	2
+inst6502_tax:
+    ld  a,(REGA)
+    ld  (REGX),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;TAY - Transfer Accumulator to Index Y [A -> Y]
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;implied	TAY	A8	1	2
+inst6502_tay:
+    ld  a,(REGA)
+    ld  (REGY),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;TSX - Transfer Stack Pointer to Index X [SP -> X]
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;implied	TSX	BA	1	2
+inst6502_tsx:
+    ld  a,(REGSP)
+    ld  (REGX),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;TXA - Transfer Index X to Accumulator [X -> A]
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;implied	TXA	8A	1	2
+inst6502_txa:
+    ld  a,(REGX)
+    ld  (REGA),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;TXS - Transfer Index X to Stack Pointer [X -> SP]
+;N	Z	C	I	D	V
+;-	-	-	-	-	-
+;implied	TXS	9A	1	2
+inst6502_txs:
+    ld  a,(REGX)
+    ld  (REGSP),a
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;TYA - Transfer Index Y to Accumulator [Y -> A]
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;implied	TYA	98	1	2
+inst6502_tya:
+    ld  a,(REGY)
+    ld  (REGA),a
+    FLAGS_ZN
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Stack Instructions
+;PHA - Push Accumulator on Stack
+;    push A
+;    N	Z	C	I	D	V
+;    -	-	-	-	-	-
+;implied	PHA	48	1	3 
+inst6502_pha:
+    ld  a,(REGA)
+    ld  bc,STACKBASE
+    ld  c,(REGSP)
+    ld  (bc),a
+    dec c
+    ld  (REGSP),c
+    jp i6502FinishLoad
+
+;PHP - Push Processor Status on Stack
+;    The status register will be pushed with the break
+;    flag and bit 5 set to 1.
+;    push SR
+;    N	Z	C	I	D	V
+;    -	-	-	-	-	-
+;implied	PHP	08	1	3  
+inst6502_php:
+    ld  a,(REGSR)
+    or  a,%00110000
+    ld  bc,STACKBASE
+    ld  c,(REGSP)
+    ld  (bc),a
+    dec c
+    ld  (REGSP),c
+    jp i6502FinishLoad
+
+
+
+;PLA - Pull Accumulator from Stack
+;    pull A
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+;implied	PLA	68	1	4  
+inst6502_pla:
+    ld  bc,STACKBASE
+    ld  c,(REGSP)
+    inc c
+    ld  a,(bc)
+    ld  (REGSP),c
+    ld  (REGA),a
+    FLAGS_ZN
+    jp i6502FinishLoad
+
+;PLP - Pull Processor Status from Stack
+;    The status register will be pulled with the break
+;    flag and bit 5 ignored.
+;    pull SR
+;    N	Z	C	I	D	V
+;    from stack
+;implied	PLP	28	1	4  
+inst6502_plp:
+    ld  bc,STACKBASE
+    ld  c,(REGSP)
+    inc c
+    ld  a,(bc)
+    ld  (REGSP),c
+    ld  b,(REGSR)
+    xor a,b
+    and a,%11001111
+    xor a,b
+    ld  (REGSR),a
+    jp i6502FinishLoad
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Decrements and Increments
+
+;DEC -  Decrement Memory by One
+;    M - 1 -> M
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+;    addressing	assembler	opc	bytes	cycles
+
+;    zeropage	DEC oper	C6	2	5  
+inst6502_dec_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    dec a
+    ld  (bc),a
+    FLAGS_ZN
+    ADDCYC(5)
+    jp i6502NextLoad
+
+;    zeropage,X	DEC oper,X	D6	2	6  
+inst6502_dec_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    dec a
+    ld  (bc),a
+    FLAGS_ZN
+    ADDCYC(6)
+    jp i6502NextLoad
+
+;    absolute	DEC oper	CE	3	6  
+inst6502_dec_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        dec a
+        ld  b,a
+        ;
+        ld  a,(REGSR)
+        res SF_ZERO,a
+        jr  z,$+4
+        set SF_ZERO,a
+        res SF_NEG,a
+        jp  m,$+5
+        set SF_NEG,a
+        ld  (REGSR),a
+        ;
+        WRITE_ACCESS
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+;    absolute,X	DEC oper,X	DE	3	7  
+inst6502_dec_absx:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        dec a
+        ld  b,a
+        ;
+        ld  a,(REGSR)
+        res SF_ZERO,a
+        jr  z,$+4
+        set SF_ZERO,a
+        res SF_NEG,a
+        jp  m,$+5
+        set SF_NEG,a
+        ld  (REGSR),a
+        ;
+        WRITE_ACCESS
+        ADDCYC(7)
+    pop hl
+    jp i6502NextLoad
+
+;DEX - Decrement Index X by One [X - 1 -> X]
+;Flags altered: NZ
+;implied	DEX	CA	1	2  
+inst6502_dex:
+    dec (REGX)
+_:  ld  a,(REGSR)
+    res SF_ZERO,a
+    jr  z,$+4
+    set SF_ZERO,a
+    res SF_NEG,a
+    jp  m,$+5
+    set SF_NEG,a
+    ld  (REGSR),a
+    ADDCYC(2)
+    jp i6502FinishLoad
+
+;DEY - Decrement Index Y by One [Y - 1 -> Y]
+;Flags altered: NZ
+;implied	DEY	88	1	2  
+inst6502_dey:
+    dec (REGY)
+    jr  -_
+
+
+;INX - Increment Index X by One [X + 1 -> X]
+;Flags altered: NZ
+;implied	INX	E8	1	2  
+inst6502_inx:
+    inc (REGX)
+    jr  -_
+
+
+;INY - Increment Index Y by One [Y + 1 -> Y]
+;Flags altered: NZ
+;implied	INY	C8	1	2  
+inst6502_iny:
+    inc (REGY)
+    jr  -_
+
+
+;INC - Increment Memory by One
+;    M + 1 -> M
+;    N	Z	C	I	D	V
+;    +	+	-	-	-	-
+
+;zeropage	INC oper	E6	2	5  
+inst6502_inc_zp:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    inc a
+    ld  (bc),a
+    FLAGS_ZN
+    ADDCYC(5)
+    jp i6502NextLoad
+
+;zeropage,X	INC oper,X	F6	2	6  
+inst6502_inc_zpx:
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    inc a
+    ld  (bc),a
+    FLAGS_ZN
+    ADDCYC(6)
+    jp i6502NextLoad
+    
+;absolute	INC oper	EE	3	6
+inst6502_inc_abs:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ;
+        ld  a,(REGSR)
+        res SF_ZERO,a
+        jr  z,$+4
+        set SF_ZERO,a
+        res SF_NEG,a
+        jp  m,$+5
+        set SF_NEG,a
+        ld  (REGSR),a
+        ;
+        WRITE_ACCESS
+        ADDCYC(6)
+    pop hl
+    jp i6502NextLoad
+
+;absolute,X	INC oper,X	FE	3	7  
+inst6502_inc_absx:
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ;
+        ld  a,(REGSR)
+        res SF_ZERO,a
+        jr  z,$+4
+        set SF_ZERO,a
+        res SF_NEG,a
+        jp  m,$+5
+        set SF_NEG,a
+        ld  (REGSR),a
+        ;
+        WRITE_ACCESS
+        ADDCYC(7)
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Arithmetic Operations
+;ADC - Add Memory to Accumulator with Carry  [A + M + C -> A, C]
+;    N	Z	C	I	D	V
+;    +	+	+	-	-	+
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	ADC #oper	69	2	2  
+inst6502_adc_imm:
+    ADDCYC(2)
+    ld  c,(hl)
+    jp  subroutine6502_adc_combined_end
+    
+
+;zeropage	ADC oper	65	2	3
+inst6502_adc_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;zeropage,X	ADC oper,X	75	2	4  
+inst6502_adc_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    add a,(REGX)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;absolute	ADC oper	6D	3	4  
+inst6502_adc_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;absolute,X	ADC oper,X	7D	3	4* 
+inst6502_adc_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;absolute,Y	ADC oper,Y	79	3	4*
+inst6502_adc_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;(indirect,X)	ADC (oper,X)	61	2	6  
+inst6502_adc_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;(indirect),Y	ADC (oper),Y	71	2	5* 
+inst6502_adc_indy:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        ADDCYC(1)
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+
+;SBC - Subtract Memory from Accumulator with Borrow
+;A - M - C̅ -> A
+;N	Z	C	I	D	V
+;+	+	+	-	-	+
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	SBC #oper	E9	2	2  
+inst6502_sbc_imm:
+    ADDCYC(2)
+    ld  c,(hl)
+    jp  subroutine6502_sbc_combined_end
+
+;zeropage	SBC oper	E5	2	3  
+inst6502_sbc_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;zeropage,X	SBC oper,X	F5	2	4  
+inst6502_sbc_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    add a,(REGX)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;absolute	SBC oper	ED	3	4  
+inst6502_sbc_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;absolute,X	SBC oper,X	FD	3	4* 
+inst6502_sbc_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;absolute,Y	SBC oper,Y	F9	3	4* 
+inst6502_sbc_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;(indirect,X)	SBC (oper,X)	E1	2	6  
+inst6502_sbc_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;(indirect),Y	SBC (oper),Y	F1	2	5* 
+inst6502_sbc_indy:
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        ADDCYC(1)
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Logical Operations
+
+;AND - AND Memory with Accumulator
+;A AND M -> A
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	AND #oper	29	2	2  
+inst6502_and_imm:
+    ADDCYC(2)
+    ld  a,(hl)
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage	AND oper	25	2	3  
+inst6502_and_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage,X	AND oper,X	35	2	4  
+inst6502_and_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute	AND oper	2D	3	4  
+inst6502_and_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,X	AND oper,X	3D	3	4* 
+inst6502_and_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,Y	AND oper,Y	39	3	4* 
+inst6502_and_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect,X)	AND (oper,X)	21	2	6  
+inst6502_and_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect),Y	AND (oper),Y	31	2	5* 
+inst6502_and_indy:
+    ADDCYC(5)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+        ADDCYC(1)
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    and a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;EOR - Exclusive-OR Memory with Accumulator
+;A EOR M -> A
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	EOR #oper	49	2	2  
+inst6502_eor_imm:
+    ADDCYC(2)
+    ld  a,(hl)
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage	EOR oper	45	2	3  
+inst6502_eor_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+
+;zeropage,X	EOR oper,X	55	2	4  
+inst6502_eor_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute	EOR oper	4D	3	4  
+inst6502_eor_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,X	EOR oper,X	5D	3	4* 
+inst6502_eor_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,Y	EOR oper,Y	59	3	4* 
+inst6502_eor_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect,X)	EOR (oper,X)	41	2	6  
+inst6502_eor_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect),Y	EOR (oper),Y	51	2	5* 
+inst6502_eor_indy:
+    ADDCYC(5)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+        ADDCYC(1)
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    xor a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;ORA - OR Memory with Accumulator
+;A OR M -> A
+;N	Z	C	I	D	V
+;+	+	-	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	ORA #oper	09	2	2  
+inst6502_ora_imm:
+    ADDCYC(2)
+    ld  a,(hl)
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage	ORA oper	05	2	3  
+inst6502_ora_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage,X	ORA oper,X	15	2	4  
+inst6502_ora_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute	ORA oper	0D	3	4  
+inst6502_ora_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,X	ORA oper,X	1D	3	4* 
+inst6502_ora_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute,Y	ORA oper,Y	19	3	4* 
+inst6502_ora_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect,X)	ORA (oper,X)	01	2	6  
+inst6502_ora_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;(indirect),Y	ORA (oper),Y	11	2	5* 
+inst6502_ora_indy:
+    ADDCYC(5)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+        ADDCYC(1)
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    or  a,(REGA)
+    ld  (REGA),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Shift & Rotate Instructions
+;ASL - Shift Left One Bit (Memory or Accumulator)
+;C <- [76543210] <- 0
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;accumulator	ASL A	0A	1	2  
+inst6502_asl:
+    ADDCYC(2)
+    sla (REGA)
+    FLAGS_CZN
+    jp i6502FinishLoad
+
+;zeropage	ASL oper	06	2	5  
+inst6502_asl_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    sla a
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;zeropage,X	ASL oper,X	16	2	6  
+inst6502_asl_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    sla a
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;absolute	ASL oper	0E	3	6  
+inst6502_asl_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(hl)
+    sla a
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;absolute,X	ASL oper,X	1E	3	7  
+inst6502_asl_absx:
+    ADDCYC(7)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(hl)
+    sla a
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;LSR - Shift One Bit Right (Memory or Accumulator)
+;0 -> [76543210] -> C
+;N	Z	C	I	D	V
+;0	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;accumulator	LSR A	4A	1	2  
+inst6502_lsr:
+    ADDCYC(2)
+    srl (REGA)
+    FLAGS_CZN
+    jp i6502FinishLoad
+
+;zeropage	LSR oper	46	2	5  
+inst6502_lsr_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    srl a
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;zeropage,X	LSR oper,X	56	2	6  
+inst6502_lsr_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    srl a
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+    
+;absolute	LSR oper	4E	3	6  
+inst6502_lsr_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(hl)
+    srl a
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;absolute,X	LSR oper,X	5E	3	7  
+inst6502_lsr_absx:
+    ADDCYC(7)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(hl)
+    srl a
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;ROL - Rotate One Bit Left (Memory or Accumulator)
+;C <- [76543210] <- C
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;accumulator	ROL A	2A	1	2  
+inst6502_rol:
+    ADDCYC(2)
+    ld  a,(REGSR)
+    rra
+    rl (REGA)
+    FLAGS_CZN
+    jp i6502FinishLoad
+
+;zeropage	ROL oper	26	2	5  
+inst6502_rol_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(REGSR)
+    rra
+    ld  a,(bc)
+    rla
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;zeropage,X	ROL oper,X	36	2	6  
+inst6502_rol_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(REGSR)
+    rra
+    ld  a,(bc)
+    rla
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;absolute	ROL oper	2E	3	6  
+inst6502_rol_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(REGSR)
+    rra
+    ld  a,(hl)
+    rla
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;absolute,X	ROL oper,X	3E	3	7  
+inst6502_rol_absx:
+    ADDCYC(7)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(REGSR)
+    rra
+    ld  a,(hl)
+    rla
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;ROR - Rotate One Bit Right (Memory or Accumulator)
+;C -> [76543210] -> C
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;accumulator	ROR A	6A	1	2  
+inst6502_ror:
+    ADDCYC(2)
+    ld  a,(REGSR)
+    rra
+    rr  (REGA)
+    FLAGS_CZN
+    jp i6502FinishLoad
+
+;zeropage	ROR oper	66	2	5  
+inst6502_ror_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(REGSR)
+    rra
+    ld  a,(bc)
+    rra
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;zeropage,X	ROR oper,X	76	2	6  
+inst6502_ror_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(REGSR)
+    rra
+    ld  a,(bc)
+    rra
+    ld  (bc),a
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;absolute	ROR oper	6E	3	6  
+inst6502_ror_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(REGSR)
+    rra
+    ld  a,(hl)
+    rra
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;absolute,X	ROR oper,X	7E	3	7  
+inst6502_ror_absx:
+    ADDCYC(7)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  a,(REGSR)
+    rra
+    ld  a,(hl)
+    rra
+    ld  b,a
+    FLAGS_CZN
+    WRITE_ACCESS
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Flag Instructions
+
+;CLC - Clear Carry Flag
+;0 -> C
+;N	Z	C	I	D	V
+;-	-	0	-	-	-
+;addressing	assembler	opc	bytes	cycles
+;implied	CLC	18	1	2  
+inst6502_clc:
+    res SF_CARRY,(REGSR)
+    jp  i6502FinishLoad
+
+;CLD - Clear Decimal Mode
+;0 -> D
+;N	Z	C	I	D	V
+;-	-	-	-	0	-
+;addressing	assembler	opc	bytes	cycles
+;implied	CLD	D8	1	2  
+inst6502_cld:
+    res SF_DEC,(REGSR)
+    jp  i6502FinishLoad
+
+;CLI -  Clear Interrupt Disable Bit
+;0 -> I
+;N	Z	C	I	D	V
+;-	-	-	0	-	-
+;addressing	assembler	opc	bytes	cycles
+;implied	CLI	58	1	2  
+inst6502_cli:
+    res SF_INT,(REGSR)
+    jp  i6502FinishLoad
+
+;CLV - Clear Overflow Flag
+;0 -> V
+;N	Z	C	I	D	V
+;-	-	-	-	-	0
+;addressing	assembler	opc	bytes	cycles
+;implied	CLV	B8	1	2  
+inst6502_clv:
+    res SF_OVER,(REGSR)
+    jp  i6502FinishLoad
+
+;SEC - Set Carry Flag
+;1 -> C
+;N	Z	C	I	D	V
+;-	-	1	-	-	-
+;addressing	assembler	opc	bytes	cycles
+;implied	SEC	38	1	2  
+inst6502_sec:
+    set SF_CARRY,(REGSR)
+    jp  i6502FinishLoad
+
+;SED - Set Decimal Flag
+;1 -> D
+;N	Z	C	I	D	V
+;-	-	-	-	1	-
+;addressing	assembler	opc	bytes	cycles
+;implied	SED	F8	1	2  
+inst6502_sed:
+    set SF_DEC,(REGSR)
+    jp  i6502FinishLoad
+
+;SEI - Set Interrupt Disable Status
+;1 -> I
+;N	Z	C	I	D	V
+;-	-	-	1	-	-
+;addressing	assembler	opc	bytes	cycles
+;implied	SEI	78	1	2  
+inst6502_sei:
+    set SF_INT,(REGSR)
+    jp  i6502FinishLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Comparisons
+
+;CMP - Compare Memory with Accumulator
+;A - M
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+
+;immediate	CMP #oper	C9	2	2  
+inst6502_cmp_imm:
+    ADDCYC(2)
+    ld  b,(hl)
+    jp  subroutine6502_cmp_combined_end
+
+;zeropage	CMP oper	C5	2	3  
+inst6502_cmp_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;zeropage,X	CMP oper,X	D5	2	4  
+inst6502_cmp_zpx:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(REGX)
+    ld  c,a
+    ld  a,(bc)
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;absolute	CMP oper	CD	3	4  
+inst6502_cmp_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;absolute,X	CMP oper,X	DD	3	4* 
+inst6502_cmp_absx:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGX)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;absolute,Y	CMP oper,Y	D9	3	4* 
+inst6502_cmp_absy:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        add a,(REGY)
+        ld  c,a
+        jr  nc,+_
+        inc b
+        inc d
+        ADDCYC(1)
+_:      add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;(indirect,X)	CMP (oper,X)	C1	2	6  
+inst6502_cmp_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;(indirect),Y	CMP (oper),Y	D1	2	5* 
+inst6502_cmp_indy:
+    ADDCYC(5)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+        ADDCYC(1)
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mul hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;-----------------------------------------------------------------------------
+;CPX - Compare Memory and Index X
+;X - M
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+;immediate	CPX #oper	E0	2	2  
+inst6502_cpx_imm:
+    ADDCYC(2)
+    ld  a,(REGX)
+    cp  (hl)
+    FLAGS_CZN
+    jp  i6502NextLoad
+
+;zeropage	CPX oper	E4	2	3  
+inst6502_cpx_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  b,a
+    ld  a,(REGX)
+    cp  b
+    FLAGS_CZN
+    jp i6502NextLoad
+;absolute	CPX oper	EC	3	4  
+inst6502_cpx_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    ld  a,(REGX)
+    cp  b
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;CPY - Compare Memory and Index Y
+;Y - M
+;N	Z	C	I	D	V
+;+	+	+	-	-	-
+;addressing	assembler	opc	bytes	cycles
+;immediate	CPY #oper	C0	2	2  
+inst6502_cpy_imm:
+    ADDCYC(2)
+    ld  a,(REGY)
+    cp  (hl)
+    FLAGS_CZN
+    jp  i6502NextLoad
+
+;zeropage	CPY oper	C4	2	3  
+inst6502_cpy_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  b,a
+    ld  a,(REGY)
+    cp  b
+    FLAGS_CZN
+    jp i6502NextLoad
+
+;absolute	CPY oper	CC	3	4  
+inst6502_cpy_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    ld  b,a
+    ld  a,(REGY)
+    cp  b
+    FLAGS_CZN
+    jp i6502NextLoad
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Conditional Branch Instructions
+
+;branch on C=0
+;relative	BCC oper	90	2	2**
+inst6502_bcc:
+    ADDCYC(2)
+    bit SF_CARRY,(REGSR)
+    jp  nz,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on C=1
+;relative	BCS oper	B0	2	2**
+inst6502_bcs:
+    ADDCYC(2)
+    bit SF_CARRY,(REGSR)
+    jp  z,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on Z=1
+;relative	BEQ oper	F0	2	2**
+inst6502_beq:
+    ADDCYC(2)
+    bit SF_ZERO,(REGSR)
+    jp  z,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on N=1
+;relative	BMI oper	30	2	2**
+inst6502_bmi:
+    ADDCYC(2)
+    bit SF_NEG,(REGSR)
+    jp  z,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+
+;branch on Z=0
+;relative	BNE oper	D0	2	2**
+inst6502_bne:
+    ADDCYC(2)
+    bit SF_ZERO,(REGSR)
+    jp  nz,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on N=0
+;relative	BPL oper	10	2	2**
+inst6502_bpl:
+    ADDCYC(2)
+    bit SF_NEG,(REGSR)
+    jp  nz,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on V=0
+;relative	BVC oper	50	2	2**
+inst6502_bvc:
+    ADDCYC(2)
+    bit SF_OVER,(REGSR)
+    jp  nz,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;branch on V=1
+;relative	BVS oper	70	2	2**
+inst6502_bvs:
+    ADDCYC(2)
+    bit SF_OVER,(REGSR)
+    jp  z,i6502NextLoad
+    jp  subroutine6502_take_branch
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Interrupts
+
+;BRK - Force Break
+;BRK initiates a software interrupt similar to a hardware
+;interrupt (IRQ). The return address pushed to the stack is
+;PC+2, providing an extra byte of spacing for a break mark
+;(identifying a reason for the break.)
+;The status register will be pushed to the stack with the break
+;flag set to 1. However, when retrieved during RTI or by a PLP
+;instruction, the break flag will be ignored.
+;The interrupt disable flag is not set automatically.
+;
+;interrupt,             N	Z	C	I	D	V
+;push PC+2, push SR     -	-	-	1	-	-
+;implied	BRK	00	1	7  
+inst6502_brk:
+    ADDCYC(7)
+    ld  hl,STACKBASE
+    ld  L,(REGSP)
+    ld.s de,(REGPC)
+    inc de      ;that extra spacer.
+    ld  (hl),d
+    dec L
+    ld  (hl),e
+    dec L
+    ld  a,(REGSR)
+    set SF_INT,a
+    ld  (hl),a
+    dec L
+    ld  (REGSP),L
+    WAS_NMI_TRIGGERED
+    ld  bc,$FE  ;IRQ vector
+    jr  z,+_
+    ld  bc,$FA  ;NMI vector, if NMI is hijacking this instruction.
+_:  ld  hl,(BASETABLE_STRIDE*$FF)+PAGETABLE
+    ld  hl,(hl)
+    add hl,bc
+    ld  de,(hl)
+    ld.s (REGPC),de
+    jp  i6502FirstLoad
+
+;RTI - Return from Interrupt
+;The status register is pulled with the break flag
+;and bit 5 ignored. Then PC is pulled from the stack.
+;pull SR, pull PC      N Z C I D V
+;                      from stack
+;implied	RTI	40	1	6  
+inst6502_rts:
+    ld  hl,STACKBASE
+    ld  l,(REGSP)
+    inc l
+    ld  a,(hl)
+    inc l
+    ld  e,(hl)
+    inc l
+    ld  d,(hl)
+    ld  (REGSP),l
+    ld.s (REGPC),de
+    ld  b,(REGSR)
+    xor a,b
+    and a,%11011111
+    xor a,b
+    ld  (REGSR),a
+    ADDCYC(6)
+    jp  i6502FirstLoad
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Miscellaneous
+;BIT - Test Bits in Memory with Accumulator
+;
+;bits 7 and 6 of operand are transfered to bit 7 and 6 of SR (N,V);
+;the zero-flag is set according to the result of the operand AND
+;the accumulator (set, if the result is zero, unset otherwise).
+;This allows a quick check of a few bits at once without affecting
+;any of the registers, other than the status register (SR).
+
+;A AND M -> Z, M7 -> N, M6 -> V             N	Z	C	I	D	V
+;                                           M7	+	-	-	-	M6
+;addressing	assembler	opc	bytes	cycles
+;zeropage	BIT oper	24	2	3  
+inst6502_bit_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+_:  and a,(REGA)
+    res SF_ZERO,a
+    jr  z,$+4
+    set SF_ZERO,a
+    ld  b,(REGSR)
+    xor a,b
+    and a,%11000010
+    xor a,b
+    ld  (REGSR),a
+    jp  i6502NextLoad
+
+;absolute	BIT oper	2C	3	4  
+inst6502_bit_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mul bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+    pop hl
+    jr  -_    
+
+;NOP - No Operation
+;implied	NOP	EA	1	2  
+inst6502_:
+inst6502_nop:
+    ADDCYC(2)
+    jp  i6502FinishLoad
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;Instructions by type: Illegal Instructions
+
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+
+
+.dl	inst6502_brk					;00
+.dl	inst6502_ora_indx				;01
+.dl	inst6502_				;02
+.dl	inst6502_				;03
+.dl	inst6502_				;04
+.dl	inst6502_ora_zp					;05
+.dl	inst6502_asl_zp					;06
+.dl	inst6502_				;07
+.dl	inst6502_php					;08
+.dl	inst6502_ora_imm				;09
+.dl	inst6502_asl					;0A
+.dl	inst6502_				;0B
+.dl	inst6502_				;0C
+.dl	inst6502_ora_abs				;0D
+.dl	inst6502_asl_abs				;0E
+.dl	inst6502_				;0F
+.dl	inst6502_bpl					;10
+.dl	inst6502_ora_indy				;11
+.dl	inst6502_				;12
+.dl	inst6502_				;13
+.dl	inst6502_				;14
+.dl	inst6502_ora_zpx				;15
+.dl	inst6502_asl_zpx				;16
+.dl	inst6502_				;17
+.dl	inst6502_clc					;18
+.dl	inst6502_ora_absy				;19
+.dl	inst6502_				;1A
+.dl	inst6502_				;1B
+.dl	inst6502_				;1C
+.dl	inst6502_ora_absx				;1D
+.dl	inst6502_asl_absx				;1E
+.dl	inst6502_				;1F
+.dl	inst6502_jsr					;20
+.dl	inst6502_and_indx				;21
+.dl	inst6502_				;22
+.dl	inst6502_				;23
+.dl	inst6502_bit_zp					;24
+.dl	inst6502_and_zp					;25
+.dl	inst6502_rol_zp					;26
+.dl	inst6502_				;27
+.dl	inst6502_plp					;28
+.dl	inst6502_and_imm				;29
+.dl	inst6502_rol					;2A
+.dl	inst6502_				;2B
+.dl	inst6502_bit_abs				;2C
+.dl	inst6502_and_abs				;2D
+.dl	inst6502_rol_abs				;2E
+.dl	inst6502_				;2F
+.dl	inst6502_bmi					;30
+.dl	inst6502_and_indy				;31
+.dl	inst6502_				;32
+.dl	inst6502_				;33
+.dl	inst6502_				;34
+.dl	inst6502_and_zpx				;35
+.dl	inst6502_rol_zpx				;36
+.dl	inst6502_						;37
+.dl	inst6502_sec					;38
+.dl	inst6502_and_absy				;39
+.dl	inst6502_			;3A
+.dl	inst6502_			;3B
+.dl	inst6502_			;3C
+.dl	inst6502_and_absx				;3D
+.dl	inst6502_rol_absx				;3E
+.dl	inst6502_			;3F
+.dl	inst6502_rts					;40
+.dl	inst6502_eor_indx				;41
+.dl	inst6502_			;42
+.dl	inst6502_			;43
+.dl	inst6502_			;44
+.dl	inst6502_eor_zp					;45
+.dl	inst6502_lsr_zp					;46
+.dl	inst6502_			;47
+.dl	inst6502_pha					;48
+.dl	inst6502_eor_imm				;49
+.dl	inst6502_lsr					;4A
+.dl	inst6502_			;4B
+.dl	inst6052_jmp_abs				;4C
+.dl	inst6502_eor_abs				;4D
+.dl	inst6502_lsr_abs				;4E
+.dl	inst6502_			;4F
+.dl	inst6502_bvc					;50
+.dl	inst6502_eor_indy				;51
+.dl	inst6502_			;52
+.dl	inst6502_			;53
+.dl	inst6502_			;54
+.dl	inst6502_eor_zpx				;55
+.dl	inst6502_lsr_zpx				;56
+.dl	inst6502_			;57
+.dl	inst6502_cli					;58
+.dl	inst6502_eor_absy				;59
+.dl	inst6502_			;5A
+.dl	inst6502_			;5B
+.dl	inst6502_			;5C
+.dl	inst6502_eor_absx				;5D
+.dl	inst6502_lsr_absx				;5E
+.dl	inst6502_			;5F
+.dl	inst6502_rts					;60
+.dl	inst6502_adc_indx				;61
+.dl	inst6502_			;62
+.dl	inst6502_			;63
+.dl	inst6502_			;64
+.dl	inst6502_adc_zp					;65
+.dl	inst6502_ror_zp					;66
+.dl	inst6502_			;67
+.dl	inst6502_pla					;68
+.dl	inst6502_adc_imm				;69
+.dl	inst6502_ror					;6A
+.dl	inst6502_			;6B
+.dl	inst6502_jmp_indir				;6C
+.dl	inst6502_adc_abs				;6D
+.dl	inst6502_ror_abs				;6E
+.dl	inst6502_			;6F
+.dl	inst6502_bvs					;70
+.dl	inst6502_adc_indy				;71
+.dl	inst6502_			;72
+.dl	inst6502_			;73
+.dl	inst6502_			;74
+.dl	inst6502_adc_zpx				;75
+.dl	inst6502_ror_zpx				;76
+.dl	inst6502_			;77
+.dl	inst6502_sei					;78
+.dl	inst6502_adc_absy				;79
+.dl	inst6502_			;7A
+.dl	inst6502_			;7B
+.dl	inst6502_			;7C
+.dl	inst6502_adc_absx				;7D
+.dl	inst6502_ror_absx				;7E
+.dl	inst6502_			;7F
+.dl	inst6502_			;80
+.dl	inst6502_sta_indx				;81
+.dl	inst6502_			;82
+.dl	inst6502_			;83
+.dl	inst6502_sty_zp					;84
+.dl	inst6502_sta_zp					;85
+.dl	inst6502_stx_zp					;86
+.dl	inst6502_			;87
+.dl	inst6502_dey					;88
+.dl	inst6502_			;89
+.dl	inst6502_txa					;8A
+.dl	inst6502_			;8B
+.dl	inst6502_sty_abs				;8C
+.dl	inst6502_sta_abs				;8D
+.dl	inst6502_stx_abs				;8E
+.dl	inst6502_			;8F
+.dl	inst6502_bcc					;90
+.dl	inst6502_sta_indy				;91
+.dl	inst6502_			;92
+.dl	inst6502_			;93
+.dl	inst6502_sty_zpx				;94
+.dl	inst6502_sta_zpx				;95
+.dl	inst6502_stx_zpy				;96
+.dl	inst6502_			;97
+.dl	inst6502_tya					;98
+.dl	inst6502_sta_absy				;99
+.dl	inst6502_txs					;9A
+.dl	inst6502_			;9B
+.dl	inst6502_			;9C
+.dl	inst6502_sta_absx				;9D
+.dl	inst6502_			;9E
+.dl	inst6502_			;9F
+.dl	inst6502_ldy_imm				;A0
+.dl	inst6502_lda_indx				;A1
+.dl	inst6502_ldx_imm				;A2
+.dl	inst6502_			;A3
+.dl	inst6502_ldy_zp					;A4
+.dl	inst6502_lda_zp					;A5
+.dl	inst6502_ldx_zp					;A6
+.dl	inst6502_			;A7
+.dl	inst6502_tay					;A8
+.dl	inst6502_lda_imm				;A9
+.dl	inst6502_tax					;AA
+.dl	inst6502_			;AB
+.dl	inst6502_ldy_abs				;AC
+.dl	inst6502_lda_abs				;AD
+.dl	inst6502_ldx_abs				;AE
+.dl	inst6502_			;AF
+.dl	inst6502_bcs					;B0
+.dl	inst6502_lda_indy				;B1
+.dl	inst6502_			;B2
+.dl	inst6502_			;B3
+.dl	inst6502_ldy_zpx				;B4
+.dl	inst6502_lda_zpx				;B5
+.dl	inst6502_ldx_zpy				;B6
+.dl	inst6502_			;B7
+.dl	inst6502_clv					;B8
+.dl	inst6502_lda_absy				;B9
+.dl	inst6502_tsx					;BA
+.dl	inst6502_			;BB
+.dl	inst6502_ldy_absx				;BC
+.dl	inst6502_lda_absx				;BD
+.dl	inst6502_ldx_absy				;BE
+.dl	inst6502_			;BF
+.dl	inst6502_cpy_imm				;C0
+.dl	inst6502_cmp_indx				;C1
+.dl	inst6502_			;C2
+.dl	inst6502_			;C3
+.dl	inst6502_cpy_zp					;C4
+.dl	inst6502_cmp_zp					;C5
+.dl	inst6502_dec_zp					;C6
+.dl	inst6502_			;C7
+.dl	inst6502_iny					;C8
+.dl	inst6502_cmp_imm				;C9
+.dl	inst6502_dex					;CA
+.dl	inst6502_			;CB
+.dl	inst6502_cpy_abs				;CC
+.dl	inst6502_cmp_abs				;CD
+.dl	inst6502_dec_abs				;CE
+.dl	inst6502_			;CF
+.dl	inst6502_bne					;D0
+.dl	inst6502_cmp_indy				;D1
+.dl	inst6502_			;D2
+.dl	inst6502_			;D3
+.dl	inst6502_			;D4
+.dl	inst6502_cmp_zpx				;D5
+.dl	inst6502_dec_zpx				;D6
+.dl	inst6502_			;D7
+.dl	inst6502_cld					;D8
+.dl	inst6502_cmp_absy				;D9
+.dl	inst6502_			;DA
+.dl	inst6502_			;DB
+.dl	inst6502_			;DC
+.dl	inst6502_cmp_absx				;DD
+.dl	inst6502_dec_absx				;DE
+.dl	inst6502_			;DF
+.dl	inst6502_cpx_imm				;E0
+.dl	inst6502_sbc_indx				;E1
+.dl	inst6502_			;E2
+.dl	inst6502_			;E3
+.dl	inst6502_cpx_zp					;E4
+.dl	inst6502_sbc_zp					;E5
+.dl	inst6502_inc_zp					;E6
+.dl	inst6502_			;E7
+.dl	inst6502_inx					;E8
+.dl	inst6502_sbc_imm				;E9
+.dl	inst6502_nop					;EA
+.dl	inst6502_			;EB
+.dl	inst6502_cpx_abs				;EC
+.dl	inst6502_sbc_abs				;ED
+.dl	inst6502_inc_abs				;EE
+.dl	inst6502_			;EF
+.dl	inst6502_beq					;F0
+.dl	inst6502_sbc_indy				;F1
+.dl	inst6502_			;F2
+.dl	inst6502_			;F3
+.dl	inst6502_			;F4
+.dl	inst6502_sbc_zpx				;F5
+.dl	inst6502_inc_zpx				;F6
+.dl	inst6502_			;F7
+.dl	inst6502_sed					;F8
+.dl	inst6502_sbc_absy				;F9
+.dl	inst6502_			;FA
+.dl	inst6502_			;FB
+.dl	inst6502_			;FC
+.dl	inst6502_sbc_absx				;FD
+.dl	inst6502_inc_absx				;FE
+.dl	inst6502_			;FF
+
+
+
+
+
+
+
+
+
+
+
+
+

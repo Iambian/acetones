@@ -1,0 +1,65 @@
+#include "ti84pce.inc"
+.org userMem-2
+.db $EF, $7B
+
+;Memory arrangement notes:
+;Contiguous saferam starts at: 0xD031F6
+;Contiguous saferam ends at  : 0xD13FD8
+;260 bytes also exists at    : 0xD006C0 and 0xD0232D
+;
+;10 bytes at 0xD031F6 for nonpage storage. Don't know what to do with that.
+;0x0E00 (3584) bytes start at 0xD03200 for paged stuff.
+;After which, there's 0xC000 (49152) bytes for other kinds of storage.
+;
+;You could 0x0800 at 0xD03800. This fits entirety of NES's base work RAM.
+;What to do with the remaining 0x0600 bytes? That's 1024+512 bytes. Not enough
+;to drive the PPU, which requires significantly more memory than that.
+
+;The cartridge (ROM) does much of the mappings. Typically, the cartridge:
+;1. Maps pattern tables 0 and 1 to $0000-$0FFF and $1000-$1FFF. CHR-RAM/ROM.
+;2. Maps nametables 0 and 1 to $2000-23BF and $2400-$27BF. VRAM. Usually
+;3. Two additional nametables. Often mirroed with 0 and 1, but cartridge can
+;   map its own memory in the $2800-$2FFF range.
+;4. $3000-$3FFF is not used.
+;Internal to the PPU are palette RAM indices ($3F00-$3F1F)
+;These are mirrored across the remainder of $3F20-$3FFF
+;Internal to the PPU, and not mapped in memory, are 256 bytes of
+;Object Attribte Memory. Seen as 64 array elements of Ycoord,Tile#,Attr,Xcoord
+
+programStart:
+    call _ClrLCDAll
+_:  ld  hl,testFilename
+    call _Mov9ToOP1
+    call _ChkFindSym
+    ret c
+    call _ChkInRam
+    jr  nz,+_
+    call _Arc_Unarc
+    jr  -_
+_:  nop
+    ld  de,9
+    add hl,de
+    ld  e,(hl)
+    add hl,de
+    inc hl
+    call _LoadDEInd_s   ;ld de,(hl) but DE is 16 bit. Then HL+=2.
+    ;HL=start of program data. DE is size of data.
+
+
+
+
+
+
+
+
+
+
+
+
+
+testFilename:
+.db AppVarObj,"NESTEST",0
+
+
+
+#include "core.z80"
