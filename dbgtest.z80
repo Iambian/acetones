@@ -1,36 +1,7 @@
 #include "ti84pce.inc"
+#include "defs.inc"
 .org userMem-2
 .db $EF, $7B
-
-screenBuf1      .equ vRam
-screenBuf2      .equ vRam+(320*240)
-saferam         .equ $D031F6
-debugram        .equ saferam+0      ;assign 32 bytes
-coreram         .equ debugram+32    ;assign 32 bytes
-
-#define REGA ix+0
-#define REGX ix+1
-#define REGY ix+2
-#define REGSP ix+3
-#define REGSR ix+4
-#define REGPC ix+5
-#define CYCLES_REMAIN (ix+8)
-#define SF_NEG 7
-#define SF_OVER 6 
-#define SF_RESERVED 5 
-#define SF_BRK 4
-#define SF_DEC 3
-#define SF_INT 2
-#define SF_ZERO 1
-#define SF_CARRY 0
-
-xPos:   ;0-39
-.db 0
-yPos:   ;0-29
-.db 0
-.db 0   ;slop byte
-curScreenBuf:
-.dl 0
 
 programStart:
     di
@@ -45,7 +16,7 @@ programStart:
     ;
     ld  hl,$55AA9D      ;STA 55AA,X
     ld  (debugram),hl
-    ld  ix,coreram
+    ld  ix,core_memory_ix
     lea de,ix+1
     lea hl,ix+0
     ld  (hl),$00
@@ -139,6 +110,7 @@ _:	ld	a,b
 bufSwap:
     ld  de,screenBuf1
     ld  hl,(mpLcdBase)
+    ld  (curScreenBuf),hl
     or  a,a
     sbc hl,de
     ex  de,hl

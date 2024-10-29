@@ -1,33 +1,4 @@
-
-#define ADDCYC(x) nop
-#define PUSHPCPLUS2() nop
-#define REGA ix+0
-#define REGX ix+1
-#define REGY ix+2
-#define REGSP ix+3
-#define REGSR ix+4
-#define REGPC ix+5
-#define CYCLES_REMAIN (ix+8)
-#define SF_NEG 7
-#define SF_OVER 6 
-#define SF_RESERVED 5 
-#define SF_BRK 4
-#define SF_DEC 3
-#define SF_INT 2
-#define SF_ZERO 1
-#define SF_CARRY 0
-
-;CHANGE THESE LATER
-#define BASETABLE $800000
-#define BASETABLE_STRIDE 8
-#define PAGETABLE_OFFSET 0
-#define PAGETABLE 0+(BASETABLE+PAGETABLE_OFFSET)
-#define JUMPTABLE_OFFSET 4
-#define JUMPTABLE 0+(BASETABLE+JUMPTABLE_OFFSET)
-;ALSO CHANGE THIS
-#define ZEROPAGE     $810000
-#define STACKBASE    $810100
-#define INTERNALVARS $810200
+#include "defs.inc"
 
 ;TODO: DEFINE MEMORY ACCESS MACROS. ONE OR MORE FOR READ AND WRITE.
 ;FIGURE OUT HOW TO GET BOTH HIGH AND LOW BYTE OF ORIGINAL ADDRESS
@@ -60,19 +31,76 @@
 #define HW_READ(src_reg) ld a,(src_reg)
 #define HW_WRITE(dst_reg) ld (dst_reg),a
 
-;Has no inputs thus yet.
-;Figure out a way to add ROM mappings and somesuch. Externally or whatnot.
-start6502Interpreter:
-    ;initialize register memory
-    ld  ix,INTERNALVARS
-    lea de,ix+0
-    lea hl,ix+1
-    ld  bc,127
-    ldir
-    ;
-    GET_ADDRESS_FROM_PC
-    ;
 
+
+i6502_load_instruction_set:
+    ld  ix,JUMPTABLE
+    ld  hl,inst6502_instruction_set
+    ld  b,0
+_:  ld  de,(hl)
+    ld  (ix+0),de
+    inc hl
+    inc hl
+    inc hl
+    lea ix,ix+BASETABLE_STRIDE
+    djnz -_
+    ret
+
+;HL=Base_ez80_address, C=Numpages_in_map, B=numpages_in_space, E=starting_page
+;Example: To map and mirror 2KB RAM at $D03800 inside first 8KB of 6502 space
+;HL=$D03800, C=$08, B=$20, E=$00
+;Note: B should be a power of two and evenly divisible by C.
+i6502_map_pages:
+    ld  d,BASETABLE_STRIDE
+    mul de
+    ld  ix,PAGETABLE
+    add ix,de
+    ld  a,b     ;A = main counter for total number of pages in mapping space
+    ld  de,256
+    push hl
+    pop iy
+_:  ld  b,c     ;looping for number of pages to map
+_:  ld  (ix+0),hl
+    add hl,de                   ;next page z80
+    lea ix,ix+BASETABLE_STRIDE  ;next page entry
+    dec a
+    ret z
+    djnz -_
+    lea hl,iy+0     ;start z80 pages over again for mirroring
+    jr --_
+
+;=============================================================================
+;=============================================================================
+;=============================================================================
+;=============================================================================
+;You should have set up the mappings already. This is because
+;mappings are program-dependant. Only $0000-$3FFF will be mapped in here
+;more or less because I don't expect anything else to map that.
+i6502Init:
+    ;
+    ; At this point, you may need to randomize 2048 bytes at main_ram
+    ;
+    ld  hl,main_ram
+    ld  bc,$002008
+    ld  e,$00
+    call i6502_map_pages
+    ld  hl,scrap_mapping
+    ld  bc,$002001
+    ld  e,$20
+    call i6502_map_pages
+    ld  iy,3    ;8 cycle startup. Hooking into inst6502_jmp_indir for init
+    ld  ix,core_memory_ix
+    lea hl,ix-128
+    lea de,ix-127
+    ld  bc,255
+    ld  (hl),$00
+    ldir
+    ;Note: SP may need initialization. So does SR for interrupts. Or somesuch.
+    ld  hl,PAGETABLE+(255*BASETABLE_STRIDE)
+    ld  hl,(hl)
+    ld  de,$0000FC
+    add hl,de
+    jp inst6502_jmp_indir
 
 i6502FirstLoad:
     ld.s de,(REGPC)
@@ -3363,7 +3391,7 @@ inst6502_nop:
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
 
-
+inst6502_instruction_set:
 .dl	inst6502_brk					;00
 .dl	inst6502_ora_indx				;01
 .dl	inst6502_				;02
