@@ -2,31 +2,66 @@
 .org userMem-2
 .db $EF, $7B
 
-;Memory arrangement notes:
-;Contiguous saferam starts at: 0xD031F6
-;Contiguous saferam ends at  : 0xD13FD8
-;260 bytes also exists at    : 0xD006C0 and 0xD0232D
-;
-;10 bytes at 0xD031F6 for nonpage storage. Don't know what to do with that.
-;0x0E00 (3584) bytes start at 0xD03200 for paged stuff.
-;After which, there's 0xC000 (49152) bytes for other kinds of storage.
-;
-;You could 0x0800 at 0xD03800. This fits entirety of NES's base work RAM.
-;What to do with the remaining 0x0600 bytes? That's 1024+512 bytes. Not enough
-;to drive the PPU, which requires significantly more memory than that.
+;SPASM help msg
+;-E = Assemble eZ80 code
+;-T = Generate code listing
+;-C = Code counter mode
+;-L = Symbol table mode
+;-S = Stats mode
+;-O = Don't write to output file
+;-I [directory] = Add include directory
+;-A = Labels are cAse-sensitive
+;-D<name>[=value] = Create a define 'name' [with 'value']
+;-N = Don't use colors for messages
+;-V <Expression> = Pipe expression directly into assembly
+;-H = Print this help message
 
-;The cartridge (ROM) does much of the mappings. Typically, the cartridge:
-;1. Maps pattern tables 0 and 1 to $0000-$0FFF and $1000-$1FFF. CHR-RAM/ROM.
-;2. Maps nametables 0 and 1 to $2000-23BF and $2400-$27BF. VRAM. Usually
-;3. Two additional nametables. Often mirroed with 0 and 1, but cartridge can
-;   map its own memory in the $2800-$2FFF range.
-;4. $3000-$3FFF is not used.
-;Internal to the PPU are palette RAM indices ($3F00-$3F1F)
-;These are mirrored across the remainder of $3F20-$3FFF
-;Internal to the PPU, and not mapped in memory, are 256 bytes of
-;Object Attribte Memory. Seen as 64 array elements of Ycoord,Tile#,Attr,Xcoord
+
+
 
 programStart:
+    di
+    ld  (save_spl),sp
+    ld  a,MB
+    ld  (save_mbase),a
+    ld  a,$D0
+    ld  MB,a
+    call startGfx
+    ;
+    ; todo; write test 6502 program, map it into rom.
+    ; map virtual screen device into ram too. 32x30 screen ascii display
+    ; is probably looking nice right about now.
+    ; Could probably map it into PPU space since we're not actually doing
+    ; anything about that until long after we're done testing core integrity
+    ; You'll probably want to create a mockup vector table then do some equate
+    ; magic to offset it and map it to $FFXX such that the three vectors will
+    ; magically line up with $FFFA-$FFFF. NMI, RES, and IRQ. In that order.
+    ; The rest of the page won't need to matter. It could literally be the
+    ; surrounding eZ80 data/code. Just... don't allow writes to it.
+    ;
+    nop
+    ;
+    ;
+    ;
+programExit:
+    call stopGfx
+    ld  sp,(save_spl)
+    ld  a,(save_mbase)
+    ld  MB,a
+    ret
+
+
+
+
+
+
+
+
+
+
+
+
+loadROM:
     call _ClrLCDAll
 _:  ld  hl,testFilename
     call _Mov9ToOP1
@@ -44,22 +79,18 @@ _:  nop
     inc hl
     call _LoadDEInd_s   ;ld de,(hl) but DE is 16 bit. Then HL+=2.
     ;HL=start of program data. DE is size of data.
-
-
-
-
-
-
-
-
-
-
-
+    ;
+    ;
+    ; TODO: Finish writing this section.
+    ;
+    ;
+    ret
 
 
 testFilename:
 .db AppVarObj,"NESTEST",0
 
 
-
+#include "lcd.z80"
 #include "core.z80"
+.echo "Main program size: ",$-programStart

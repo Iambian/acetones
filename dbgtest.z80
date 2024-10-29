@@ -1,16 +1,12 @@
 #include "ti84pce.inc"
 #include "defs.inc"
+
 .org userMem-2
 .db $EF, $7B
 
 programStart:
     di
-    call _boot_ClearVRAM
-    ld  de,lcdWatermark+lcdIntFront+lcdPwr+lcdBgr+lcdBpp8
-    ld  bc,screenBuf1
-    call configureScreen
-    call setDefaultPalette
-
+    call startGfx
     ;
     ; Start ASM-y stuff here.
     ;
@@ -32,91 +28,15 @@ programStart:
     ld  (xPos),hl
 
     call dbg_printDisassembly
-    call bufSwap
+    call fastCopy
 
     jr $
 
-
-
-
     ;
-    ; Do ASM-y stuff here.
+    ; End ASM-y stuff here.
     ;
-
-
     ld  iy,flags
-unconfigureScreen:
-    call _boot_ClearVRAM
-    ld  de,lcdNormalMode
-    ld  bc,screenBuf1
-;Input: DE=LCDModes BC=LCDBaseAddress
-configureScreen:
-    ld  hl,mpLcdBase
-    ld  (hl),bc
-    ld  L,lcdCtrl
-    ld  (hl),de
-    ld  L,lcdTiming0 + 1
-    ld  bc,8
-    ld  de,screenSettings
-_:  ld  a,(de)
-    ldi
-    dec hl
-    ld  (hl),a
-    inc hl
-    jp  pe,-_
-    ld  hl,screenBuf2
-    ld  (curScreenBuf),hl
-    ret
-
-screenSettings:
-;Copied from my old Falldown2 project, which copied from graphx.asm
-;	.db	14 shl 2			; PPL shl 2
-	.db	7					; HSW
-	.db	87					; HFP
-	.db	63					; HBP
-	.dw	(0 >> 10)+319		; (VSW shl 10)+LPP
-	.db	179					; VFP
-	.db	0					; VBP
-	.db	(0 >> 6)+(0 >> 5)+0	; (ACB shl 6)+(CLKSEL shl 5)+PCD_LO
-;  H = ((PPL+1)*16)+(HSW+1)+(HFP+1)+(HBP+1) = 240+8+88+64 = 400
-;  V = (LPP+1)+(VSW+1)+VFP+VBP = 320+1+179+0 = 500
-; CC = H*V*PCD*2 = 400*500*2*2 = 800000
-; Hz = 48000000/CC = 60
-
-;Also copied from graphx
-setDefaultPalette:
-	ld	de,mpLcdPalette	    ; address of mmio palette
-	ld	b,e			        ; b = 0
-_:	ld	a,b
-	rrca
-	xor	a,b
-	and	a,224
-	xor	a,b
-	ld	(de),a
-	inc	de
-	ld	a,b
-	rla
-	rla
-	rla
-	ld	a,b
-	rra
-	ld	(de),a
-	inc	de
-	inc	b
-	jr	nz,-_		    ; loop for 256 times to fill palette
-	ret
-
-
-bufSwap:
-    ld  de,screenBuf1
-    ld  hl,(mpLcdBase)
-    ld  (curScreenBuf),hl
-    or  a,a
-    sbc hl,de
-    ex  de,hl
-    jr  nz,+_
-    ld  hl,screenBuf2
-_:  ld  (mpLcdBase),hl
+    call stopGfx
     ret
 
 testText:
@@ -124,5 +44,7 @@ testText:
 testText2:
 .db "This is the second string!",0
 
-#include "print.z80"
+#include "lcd.z80"
 #include "debug.z80"
+
+.echo "Debug test program size: ",$-programStart
