@@ -39,6 +39,27 @@ programStart:
     ; The rest of the page won't need to matter. It could literally be the
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
+
+    ;load reset vectors
+    ld  hl,testVectors
+    ld  bc,$000101
+    ld  e,$FF
+    call i6502_map_pages
+    ;load program ROM to lowmem
+    ld  hl,testCode
+    ld  bc,$002008
+    ld  e,$80
+    call i6502_map_pages
+    ;map nametable to writeable address space. Write routine to mirror this
+    ;memory to screen.
+    ld  hl,NAMETABLE1
+    ld  bc,$002008
+    ld  e,$40
+    call i6502_map_pages
+    ;Everything should be ready. Set up the debug environment and then
+    ;start the emulation.
+    jr $
+    call i6502Init
     nop
     ;
     ;
@@ -48,18 +69,8 @@ programExit:
     ld  sp,(save_spl)
     ld  a,(save_mbase)
     ld  MB,a
+    ld  iy,flags
     ret
-
-
-
-
-
-
-
-
-
-
-
 
 loadROM:
     call _ClrLCDAll
@@ -86,9 +97,20 @@ _:  nop
     ;
     ret
 
-
 testFilename:
 .db AppVarObj,"NESTEST",0
+
+
+;NMI, RES, and IRQ. In that order.
+testVectors .equ $-(256-6)
+.dw $8000
+.dw $8000
+.dw $8000
+testCode:
+.db $02     ;JAM. Emulator terminates on unsupported instructions or JAMs.
+
+
+
 
 
 #include "lcd.z80"

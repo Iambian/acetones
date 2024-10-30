@@ -53,19 +53,20 @@ i6502Init:
     ld  bc,$002001
     ld  e,$20
     call i6502_map_pages
-    ld  iy,3    ;8 cycle startup. Hooking into inst6502_jmp_indir for init
+    ld  iy,2    ;8 cycle startup. Hooking into inst6502_jsr for init
     ld  ix,core_memory_ix
     lea hl,ix-128
     lea de,ix-127
     ld  bc,255
     ld  (hl),$00
     ldir
+    call i6502_load_instruction_set
     ;Note: SP may need initialization. So does SR for interrupts. Or somesuch.
     ld  hl,PAGETABLE+(255*BASETABLE_STRIDE)
     ld  hl,(hl)
     ld  de,$0000FC
     add hl,de
-    jp inst6502_jmp_indir
+    jp inst6502_jsr
 
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
@@ -3192,8 +3193,9 @@ _:  ld  (REGPC+0),a
 inst6502_jmp_indir:
     ADDCYC(5)
     ld  e,(hl)
+    ld  a,e
     inc hl
-    inc e
+    inc a
     jr  nz,+_
     ld  b,(ix+REGPC+1)
     inc b
@@ -3215,7 +3217,7 @@ _:  ld  d,(hl)  ;new 6502 address to read from is loaded from memory
     ld  d,0
     ld  e,c
     add hl,de   ;full real address reconstructed.
-    ld.s de,(hl)
+    ld  de,(hl)
     ld.s (ix+REGPC),de
     jp  i6502FirstLoad
 inst6502_jmp_indir_splitread:
