@@ -7,41 +7,50 @@
 dbg_printChr    = PrintBigFont
 operbuf         = debugram
 
+;A=instruction. Returns: A=size
+dbg_getInstSize:
+    push hl \ push de
+        ld  d,a
+        ld  e,4
+        mlt de
+        ld  hl,inst6502_disassembly_table+3
+        add hl,de
+        ld  d,0
+        ld  e,(hl)
+        ld  hl,inst6502_opcode_width_table
+        add hl,de
+        ld  a,(hl)
+    pop de \ pop hl
+    ret
+
+
+
 dbg_printDisassembly:
     push af \ push bc \ push de \ push hl \ push ix
     ;find entry in disassembly table
-    ld  a,(operbuf)
-    ld  L,a
+    ld  hl,(operbuf)
     ld  H,4
     mlt hl
     ld  de,inst6502_disassembly_table
     add hl,de
-    ;print static entry in disassembly table
     ld  b,3
-_:  push bc
-        ld  a,(hl)
-        inc hl
-        push hl
-            call dbg_printChr
-        pop hl
-    pop bc
+_:  ld  a,(hl)
+    inc hl
+    call dbg_printC
     djnz -_
-    push hl
-        ld  a,' '
-        call dbg_printChr
-    pop hl
-    ;retrieve type data then iterate over disassembler table until type found
+    ld  a,' '
+    call dbg_printC
     ld  b,(hl)
-    inc b   ;we want to count the 0th entry as well for the djnz to work.
+    inc b
+    ;Instruction addressing mode in B. Now find text for that address mode.
     ld  hl,inst6502_disassembler
     ld  de,0
 _:  ld  e,(hl)
     add hl,de
     djnz -_
-    dec e   ;if entry is zero-sized (itself-1), nothing to write
-    jr  z,dbg_printDisassembly_end
-    ;roll back to formatted text. Print operand data
-    sbc hl,de
+    dec e
+    jr  z,dbg_printDisassembly_end  ;stop if text is zero-sized
+    sbc hl,de   ;rewind to start of text part of instruction. E is text length.
     ld  b,e
 dbg_printDisassembly_printOperandLoop:
     ld  a,(hl)
@@ -54,16 +63,28 @@ _:  cp  a,'2'
     jr  nz,+_
     call dbg_printOperand2
     jr  dbg_PrintDisassembly_printOperandFallthrough
-_:  push bc
-        push hl
-            call dbg_printChr
-        pop hl
-    pop bc
+_:  cp  a,'-'
+    jr  nz,+_
+    call dbg_printRel1
+    jr  dbg_PrintDisassembly_printOperandFallthrough
+_:  call dbg_printC
 dbg_PrintDisassembly_printOperandFallthrough:
     djnz dbg_printDisassembly_printOperandLoop
 dbg_printDisassembly_end:
     pop ix \ pop hl \ pop de \ pop bc \ pop af
     ret
+
+dbg_printRel1:
+    ld  a,(operbuf+1)
+    or  a,a
+    jp  p,dbg_printRel1_skipNeg
+    push af
+        ld   a,'-'
+        call dbg_printC
+    pop af
+    neg
+dbg_printRel1_skipNeg:
+    jr dbg_printHex
 
 dbg_printOperand2:
     ld  a,(operbuf+2)
@@ -71,11 +92,7 @@ dbg_printOperand2:
 dbg_printOperand1:
     ld  a,(operbuf+1)
 dbg_printHex:
-    push bc 
-        push hl
-            call dispAHex
-        pop hl
-    pop bc
+    call dispAHex
     ret
 
 dispAHex:
@@ -91,6 +108,10 @@ _:  or  a,$F0
     daa
     add a,$A0
     adc a,$40
-    jp  dbg_printChr
-
-    
+dbg_printC:
+    push hl
+        push bc
+            call dbg_printChr
+        pop bc
+    pop hl
+    ret

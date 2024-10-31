@@ -53,13 +53,25 @@ programStart:
     ;map nametable to writeable address space. Write routine to mirror this
     ;memory to screen.
     ld  hl,NAMETABLE1
-    ld  bc,$002008
+    ld  bc,$002004
     ld  e,$40
     call i6502_map_pages
     ;Everything should be ready. Set up the debug environment and then
     ;start the emulation.
-    jr $
+    ;jr $
+    call clearTextBuf
     call i6502Init
+
+;    call clearTextBuf
+;    ld  hl,helloWorld
+;    ld  de,NAMETABLE1+(32*1)+1
+;    ld  bc,13
+;    ldir
+    call printTextBuf
+    call fastCopy
+    jr   $
+
+
     nop
     ;
     ;
@@ -107,9 +119,23 @@ testVectors .equ $-(256-6)
 .dw $8000
 .dw $8000
 testCode:
+.db $A9,$00,$AA,$A8
+.db $BD,$14,$80
+.db $C9,$00
+.db $F0,$08
+.db $99,$21,$40
+.db $E8,$C8
+;.db $12
+.db $4C,$04,$80,$02,$48,$65,$6C,$6C,$6F,$2C,$20,$57,$6F
+.db $72,$6C,$64,$21,$00
+
+
+.db $A9,$00,$AA,$A8,$BD,$11,$80,$C9,$00,$F0,$05,$99,$21,$40,$D0
+.db $F4,$02,$48,$65,$6C,$6C,$6F,$2C,$20,$57,$6F,$72,$6C,$64,$21,$00
 .db $02     ;JAM. Emulator terminates on unsupported instructions or JAMs.
 
-
+helloWorld:
+.db "Hello, World!",0
 
 
 

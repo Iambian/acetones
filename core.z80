@@ -19,7 +19,7 @@
 
 #define OPRFLG_C res SF_CARRY,b \ jr nc,$+4 \ set SF_CARRY,b
 #define OPRFLG_V res SF_OVER,b \ jp po,$+5 \ set SF_OVER,b
-#define OPRFLG_Z res SF_ZERO,b \ jr z,$+4 \ set SF_ZERO,b
+#define OPRFLG_Z res SF_ZERO,b \ jr nz,$+4 \ set SF_ZERO,b
 #define OPRFLG_N res SF_NEG,b \ jr nc,$+4 \ set SF_NEG,b
 
 #define FLAGS_ZN ld b,(ix+REGSR) \ add a,a \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
@@ -1231,7 +1231,7 @@ inst6502_dec_abs:
         ;
         ld  a,(ix+REGSR)
         res SF_ZERO,a
-        jr  z,$+4
+        jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
         jp  m,$+5
@@ -1267,7 +1267,7 @@ _:      add hl,bc   ;full address
         ;
         ld  a,(ix+REGSR)
         res SF_ZERO,a
-        jr  z,$+4
+        jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
         jp  m,$+5
@@ -1286,7 +1286,7 @@ inst6502_dex:
     dec (ix+REGX)
 _:  ld  a,(ix+REGSR)
     res SF_ZERO,a
-    jr  z,$+4
+    jr  nz,$+4
     set SF_ZERO,a
     res SF_NEG,a
     jp  m,$+5
@@ -1371,7 +1371,7 @@ inst6502_inc_abs:
         ;
         ld  a,(ix+REGSR)
         res SF_ZERO,a
-        jr  z,$+4
+        jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
         jp  m,$+5
@@ -1407,7 +1407,7 @@ _:      add hl,bc   ;full address
         ;
         ld  a,(ix+REGSR)
         res SF_ZERO,a
-        jr  z,$+4
+        jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
         jp  m,$+5
@@ -3179,7 +3179,7 @@ inst6052_jmp_abs:
     ld  hl,PAGETABLE
     add hl,de
     ld  hl,(hl)
-_:  ld  (REGPC+0),a
+_:  ld  (ix+REGPC+0),a
     ld  a,(hl)
     ld  (ix+REGPC+1),a
     ADDCYC(3)
@@ -3319,7 +3319,7 @@ inst6502_bit_zp:
     ld  a,(bc)
 _:  and a,(ix+REGA)
     res SF_ZERO,a
-    jr  z,$+4
+    jr  nz,$+4
     set SF_ZERO,a
     ld  b,(ix+REGSR)
     xor a,b
@@ -3360,6 +3360,9 @@ inst6502_nop:
 inst6502_:
     ret
 
+inst6502_halt:
+    jr $
+    jp i6502FinishLoad
 
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
@@ -3438,7 +3441,7 @@ inst6502_instruction_set:
 .dl	inst6502_				;0F
 .dl	inst6502_bpl					;10
 .dl	inst6502_ora_indy				;11
-.dl	inst6502_				;12
+.dl	inst6502_halt				;12 JAM. Used to halt emulation for inspection
 .dl	inst6502_				;13
 .dl	inst6502_				;14
 .dl	inst6502_ora_zpx				;15

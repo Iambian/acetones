@@ -106,6 +106,56 @@ screenSettings:
 ;-----------------------------------------------------------------------------
 ; Text Rendering
 
+clearTextBuf:
+    ld  hl,NAMETABLE1
+    ld  de,NAMETABLE1+1
+    ld  bc,1023
+    ld  (hl),' '
+    ldir
+    ret
+
+printTextBuf:
+    ld  hl,NAMETABLE1
+    xor a,a
+    ld  (yPos),a
+    ld  c,30
+_:  ld  a,8
+    ld  (xPos),a
+    ld  b,$20
+_:  ld  a,(hl)
+    inc hl
+    push bc
+        push hl
+            call printBigFont
+        pop hl
+    pop bc
+    djnz -_
+    ld  a,(yPos)
+    inc a
+    ld  (yPos),a
+    dec  c
+    jr  nz,--_
+    ret
+
+;A=column to start on
+setLineStart:
+    ld  (xPos),a
+    ld  (linestart),a
+    ret
+
+;A=row to start on
+setCurLine:
+    ld  (yPos),a
+    ret
+
+newLine:
+    ld  a,(linestart)
+    ld  (xPos),a
+    ld  a,(yPos)
+    inc a
+    ld  (yPos),a
+    ret
+    
 
 ;HL=address to string
 printString:

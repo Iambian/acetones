@@ -33,12 +33,13 @@ PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
 JUMPTABLE_OFFSET    .equ 4
 JUMPTABLE           .equ BASETABLE+JUMPTABLE_OFFSET
 
-NAMETABLE1          .equ BASETABLE+(256*BASETABLE_STRIDE)
+NAMETABLE1          .equ BASETABLE+(512*BASETABLE_STRIDE)
 NAMETABLE2          .equ NAMETABLE1 + 1024
 
 ;saferam1 1024 bytes storage
 ;
-curScreenBuf        .equ saferam1   ;3b
+curScreenBuf        .equ saferam1           ;3b
+linestart           .equ curScreenBuf+3     ;1b
 ;
 ;
 
