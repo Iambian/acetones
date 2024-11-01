@@ -126,7 +126,8 @@ testCode:
 .db $99,$21,$40
 .db $E8,$C8
 ;.db $12
-.db $4C,$04,$80,$02,$48,$65,$6C,$6C,$6F,$2C,$20,$57,$6F
+.db $4C,$04,$80,$02
+.db $48,$65,$6C,$6C,$6F,$2C,$20,$57,$6F
 .db $72,$6C,$64,$21,$00
 
 
@@ -137,7 +138,35 @@ testCode:
 helloWorld:
 .db "Hello, World!",0
 
+;Copied from my Falldown2 project. I didn't want to have to
+;find yet another hardware reference for something I already did.
+;But I'll have to do it again anyway because this isn't exactly
+;what we're looking for. Here, we output the same sort of
+;game keys that I've used basically all my programming life.
+;Anyhoo. We'll be using the following:
+;kbitDown	equ 00h
+;kbitLeft	equ 01h
+;kbitRight	equ 02h
+;kbitUp		equ 03h
+;kbitYequ equ 04h
+;kbit2nd		equ 05h
+;kbitMode	equ 06h
+;kbitDel		equ 07h
+;You can find the other defines approximately where I found the stuff above.
 
+getkbd_adl:
+	ld  ix,mpKeyMode
+	lea hl,ix+0
+	ld  (hl),keyModeScanOnce
+	xor a
+_:  cp  (hl)
+	jr  nz,-_
+	ld  a,(ix+kbdG1-mpKeyRange)
+	ld  l,(ix+kbdG7-mpKeyRange)
+	xor L
+	and 11110000b	;mask out lower bits to let me shove dpad bits in
+	xor L
+	ret
 
 #include "lcd.z80"
 #include "core.z80"

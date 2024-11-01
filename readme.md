@@ -10,5 +10,7 @@ Here's hoping it in itself doesn't do that.
 
 Progress
 --------
-* Core filled out with official instructions. NOT TESTED.
-* Opcode disassembler with all known instructions. NOT TESTED.
+* Core filled out with official instructions. SOME TESTED.
+* Opcode disassembler with all known instructions. SOME TESTED. PROBABLY WORKS.
+* Memory can now be mapped to RAM or ROM. Sort of. No hardware
+* Test rig set up to map memory to a character display.
