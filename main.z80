@@ -69,10 +69,10 @@ programStart:
 ;    ldir
     call printTextBuf
     call fastCopy
-    jr   $
-
-
     nop
+    call waituntilnewkeypress
+    call waituntilkeyrelease
+
     ;
     ;
     ;
@@ -167,6 +167,20 @@ _:  cp  (hl)
 	and 11110000b	;mask out lower bits to let me shove dpad bits in
 	xor L
 	ret
+
+
+waituntilkeyrelease:
+    call getkbd_adl
+    or  a,a
+    jr  nz,waituntilkeyrelease
+	ret
+
+waituntilnewkeypress:
+    call waituntilkeyrelease
+_:  call getkbd_adl
+	or  a,a
+	jr  z,-_
+    ret
 
 #include "lcd.z80"
 #include "core.z80"
