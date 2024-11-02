@@ -40,6 +40,14 @@ programStart:
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
 
+    ld hl,$55AA99
+    push hl
+        ld hl,$DEADBE
+        push hl
+            jr $
+        pop hl
+    pop hl
+
     ;load reset vectors
     ld  hl,testVectors
     ld  bc,$000101
@@ -181,6 +189,74 @@ _:  call getkbd_adl
 	or  a,a
 	jr  z,-_
     ret
+
+;Input: IY = locationOfSignature. 
+;       BC=size of signature (long load to clear BCU), still limited to 255.
+;Output: carry=1: Variable not found.
+;Output: carry=0: DE=address of variable data start after the signature
+;        IX=location of current variable's VAT location.
+;Destroys: All registers not in use.
+;NOTES: This routine is capable of resuming a search that has ended.
+
+;To continue searching:
+;call vatTraverse_continue with the following inputs:
+;   IX preserved from a non-carry return of vatTraverse.
+;   BC = same as input for vatTraverse. vatTraverse does not destroy this reg.
+;   WARNING: DO NOT KEEP SEARCHING AFTER CALL RETURNS CARRY. START A NEW SEARCH.
+vatTraverse:
+    ;progPtr = progvat start; ptemp = progvatend
+    ld  ix,(progPtr)
+vatTraverse_loop:
+    ld  hl,(pTemp)
+    lea de,ix+0
+    or  a,a
+    sbc hl,de   ;HL<DE while in pVAT, else carry set.
+    ret c
+    ld  a,(de)
+    and a,$0F
+    cp  a,AppVarObj
+    jr  nz,vatTraverse_skip
+    ld  de,(ix-7)   ;puts "page" byte in DEU
+    ld  e,(ix-3)
+    ld  d,(ix-4)
+    call _ChkInRam
+    ex  de,hl
+    jr  nc,+_
+    ld  de,9
+    add hl,de
+    ld  e,(hl)
+    add hl,de
+    inc hl
+_:  ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ex  de,hl
+    or  a,a
+    sbc hl,bc   ;varsize-entrysize. If carry, entry cannot possibly be in var.
+    jr  c,vatTraverse_skip
+    lea hl,iy+0
+    push bc
+_:      ld  a,(de)
+        inc de
+        cpi
+        jr  nz,vatTraverse_sigNoMatch
+        jp  pe,-_
+    pop bc
+    or  a,a
+    ret         ;NC. DE = past the signature.
+vatTraverse_sigNoMatch:
+    pop bc
+vatTraverse_continue:
+vatTraverse_skip:
+    ld  a,7
+    ld  de,0
+    add a,(ix-6)
+    ld  e,a
+    sbc ix,de
+    jr  vatTraverse_loop
+
+
 
 #include "lcd.z80"
 #include "core.z80"
