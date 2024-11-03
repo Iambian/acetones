@@ -40,6 +40,25 @@ NAMETABLE2          .equ NAMETABLE1 + 1024
 ;
 curScreenBuf        .equ saferam1           ;3b
 linestart           .equ curScreenBuf+3     ;1b
+inputNumFiles       .equ linestart+1        ;1b
+basefile_sig        .equ inputNumFile+1     ;3b pointer to 16b hash
+missing_files       .equ basefile_sig+3     ;1b
+total_rom_size      .equ missing_files+1    ;3b
+prg_rom_size        .equ total_rom_size+3   ;3b
+chr_rom_size        .equ prg_rom_size+3     ;3b
+
+MAXPRGROM_HINIB     .equ 1
+MAXCHRROM_HINIB     .equ 3
+
+MAXNUMFILES         .equ 1                  ;set to 32 later. that's like 1.5MB
+FILETABLE_STRIDE    .equ 8
+FILETABLE           .equ total_rom_size+3      ;(MAXNUMFILES*FILETABLE_STRIDE)b
+FILE_SIZE_OFFSET    .equ 0
+FILE_ADR_OFFSET     .equ 2
+FILE_SIG_ADR_OFFSET .equ 5
+
+
+
 ;
 ;
 

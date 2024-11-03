@@ -2,15 +2,21 @@
 #include "defs.inc"
 
 ;Function list:
-; fastCopy
-; stopGfx
-; startGfx
-; configureScreen
-; setDefaultPalette
-; printString
-; printBigFont
-; printSmallNumPair 
-; calculateScreenPtr
+; fastCopy - Swaps drawing buffer to display what is currently written there.
+; startGfx - Configures LCD to run in graphx mode. UNSAFE TO RUN MORE THAN ONCE
+; stopGfx - Restores LCD configuration to TI-OS default.
+; configureScreen - Swaps screen configuration betwen current and stored.
+; setDefaultPalette - Sets default (XLIBC) color palette.
+; clearTextBuf - no inputs. Sets text buffer to all spaces.
+; printTextBuf - no inputs. Mirrors buffer to screen.
+; setLineStart - A=xpos. Set xPos and linestart
+; setCurLine - A=ypos. Set yPos.
+; newLine - no inputs. sets linestart = xPos, increments yPos
+; newPage - no inputs. sets linestart = xPos, yPos = 0
+; printString - HL=address to string. destroys all.
+; printBigFont - A=ASCII char to print at xPos,yPos. Advances xPos by 1.
+; printSmallNumPair - A=0-255 to print at xPos,Ypos. Advances xPos by 1.
+; calculateScreenPtr - Converts xPos,yPos into screen buffer address.
 ;
 ;
 ;
@@ -115,6 +121,8 @@ clearTextBuf:
     ret
 
 printTextBuf:
+    ld  hl,(xPos)
+    ld  (printTextBuf_smcPosRecovery),hl
     ld  hl,NAMETABLE1
     xor a,a
     ld  (yPos),a
@@ -135,6 +143,9 @@ _:  ld  a,(hl)
     ld  (yPos),a
     dec  c
     jr  nz,--_
+printTextBuf_smcPosRecovery .equ $+1
+    ld  hl,0
+    ld  (xPos),hl
     ret
 
 ;A=column to start on
@@ -148,6 +159,9 @@ setCurLine:
     ld  (yPos),a
     ret
 
+newPage:
+    ld  a,$FF
+    ld  (yPos),a
 newLine:
     ld  a,(linestart)
     ld  (xPos),a
@@ -155,6 +169,8 @@ newLine:
     inc a
     ld  (yPos),a
     ret
+
+    
     
 
 ;HL=address to string
@@ -163,7 +179,11 @@ printString:
     inc hl
     or  a,a
     ret z
-    push hl
+    cp  a,'\n'
+    jr nz,+_
+    call newLine
+    jr  printString
+_:  push hl
         call printBigFont
     pop hl
     jr printString
@@ -183,8 +203,10 @@ printBigFont:
 _:  ld  b,8
     ld  a,(de)
 _:  add a,a
+fontBGColor_var .equ $+1
     ld  (hl),FONTBGCOLOR
     jr  nc,$+4
+fontFGColor_var .equ $+1
     ld  (hl),FONTFGCOLOR
     inc hl
     djnz -_

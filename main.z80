@@ -40,14 +40,6 @@ programStart:
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
 
-    ld hl,$55AA99
-    push hl
-        ld hl,$DEADBE
-        push hl
-            jr $
-        pop hl
-    pop hl
-
     ;load reset vectors
     ld  hl,testVectors
     ld  bc,$000101
@@ -68,14 +60,48 @@ programStart:
     ;start the emulation.
     ;jr $
     call clearTextBuf
-    call i6502Init
+    ld  a,1
+    call setLineStart
+    call setCurLine
+    ld  hl,text001
+    call printString
+    ld  iy,firstFileHeader
+    ld  bc,0
+    ld  c,(iy-1)
+    call vatTraverse
+    jr  nc,+_
+    ld  hl,text002
+    call printString
+    jp endCurrentRun
+_:  push de
+        ld  hl,text003
+        call printString
+    pop de
+    ld  b,(ix-6)
+    lea hl,ix-7
+_:  ld  a,(hl)
+    dec hl
+    push hl
+        push bc
+            call PrintBigFont
+        pop bc
+    pop hl
+    djnz -_
+    call newLine
+
+
+
+
+    ;call i6502Init
 
 ;    call clearTextBuf
 ;    ld  hl,helloWorld
 ;    ld  de,NAMETABLE1+(32*1)+1
 ;    ld  bc,13
 ;    ldir
-    call printTextBuf
+
+endCurrentRun:
+    ;call printTextBuf
     call fastCopy
     nop
     call waituntilnewkeypress
@@ -190,6 +216,224 @@ _:  call getkbd_adl
 	jr  z,-_
     ret
 
+
+text001:
+.db "Looking up nestest...\n",0
+text002:
+.db "Traverse found no candidates.\n",0
+text003:
+.db "File found: ",0
+
+
+.db 7
+firstFileHeader:
+.db "CENROM",0
+
+err_:
+
+err_err:
+    pop hl
+    call printString
+err_err_quit:
+    call fastCopy
+    nop
+    call waituntilnewkeypress
+    call waituntilkeyrelease
+    jp programExit
+
+err_missingFiles:
+    push af
+        ld  hl,err_missingFiles_str
+        call printString
+    pop af
+    call printSmallNumPair
+    jp err_err_quit
+err_missingFiles_str:
+.db "Number of files missing: ",0
+
+err_tooManyFiles:
+    call err_err
+.db "Too many files found.",0
+
+err_PRGROMTooLarge:
+    call err_err
+.db "PRG_ROM too large.",0
+err_CHRROMTooLarge:
+    call err_err
+.db "CHR_ROM too large.",0
+
+err_missingROMDetected:
+    call err_err
+.db "PRG+CHR > Actual file data.",0
+
+err_ROMHeaderDamaged:
+    call err_err
+.db "INES ROM header damaged.",0
+
+
+;Input: DE = Address of first file after the container header signature
+;Outputs: ROM vectors recorded and ready to map
+;Destroys: All registers.
+loadROMFile:
+    ex  de,hl
+    xor a,a
+    ld  (missing_files),a
+_:  cp  (hl)    ;
+    inc hl      ;
+    jr  nz,-_   ;skips past zero-terminated string containing full ROM name
+    ld  (basefile_sig),hl
+    ld  bc,16
+    add hl,bc
+    ld  a,(hl)
+    cp  a,MAXNUMFILES
+    jp  nc,err_tooManyFiles
+    ld  (inputNumFiles),a
+    ld  b,a
+    ld  c,16
+    mlt bc
+    inc hl
+    push hl
+        add hl,bc
+        ld  iy,FILETABLE
+        ld  c,(hl)
+        inc hl
+        ld  b,(hl)
+        inc hl
+        ld.s (iy+FILE_SIZE_OFFSET),bc
+        ld  (iy+FILE_ADR_OFFSET),hl
+    pop hl
+    inc a
+    dec a
+    jr  z,loadROMFile_singleFileLoad
+    ;If more than one file, fill FILETABLE.
+    ;NOTE: For now, this machinery is disabled. Only a single file is allowed.
+    lea iy,iy+FILETABLE_STRIDE
+    ld  b,a
+loadROMFile_multiFileLoadLoop:
+    push bc
+        ld  (iy+FILE_SIG_ADR_OFFSET),hl
+        ld  bc,16
+        ld  de,loadROMFile_tempSigHash
+        ldir
+        push hl
+            push iy
+                ld  bc,23
+                ld  iy,loadROMFile_tempSig
+                call vatTraverse    ;returns DE @ datasection size if found
+                jr  nc,+_
+                ld  hl,missing_files
+                inc (hl)
+_:          pop iy
+            ex  de,hl
+            ld  e,(hl)
+            inc hl
+            ld  d,(hl)
+            inc hl
+            ld.s (iy+FILE_SIZE_OFFSET),de
+            ld  (iy+FILE_ADR_OFFSET),hl
+        pop hl
+    pop bc
+    lea iy,iy+FILETABLE_STRIDE
+    djnz loadROMFile_multiFileLoadLoop
+    ld  a,(missing_files)
+    or  a,a
+    jp  nz,err_missingFiles
+loadROMFile_singleFileLoad:
+    ;Compute size of ROM by summing filesizes, less INES header
+    ld  a,(inputNumFiles)
+    inc a
+    ld  b,a
+    ld  hl,0
+    ld  ix,FILETABLE
+_:  ld.s de,(ix+FILE_SIZE_OFFSET)
+    add hl,de
+    lea ix,ix+FILETABLE_STRIDE
+    djnz -_
+    ld  bc,-16
+    add hl,bc   ;subtract INES header
+    ld  (total_rom_size),hl
+    ;Verify that the file actually contains an INES header.
+    ;TODO: Do this at an earlier stage. Such as file selection.
+    ld  hl,(ix+0)
+    ld  de,-$53454E         ;4E 45 53 == "NES"
+    add hl,de
+_:  jp  nz,err_ROMHeaderDamaged
+    ld  a,(ix+3)
+    cp  a,$1A
+    jr  nz,-_   ;19
+    ;Compute ROM size by reading INES header. This should be equ or lt above.
+    ;Note: The below line is optimized from...
+    ld  ix,(FILETABLE+FILE_ADR_OFFSET)
+    ;... these lines. But the intent might not be perfectly clear. We'll keep
+    ;these here just in case there's ever a question about it.
+;    ld  ix,FILETABLE
+;    ld  ix,(ix+FILE_ADR_OFFSET)
+    ld  L,(ix+4)    ;PRG ROM count, low
+    ld  e,(ix+5)    ;CHR ROM count, low
+    ld  h,0
+    ld  d,h
+    ld  a,(ix+7)    ;Check for INES2 bits
+    and a,%00001100
+    cp  a,%00001000
+    jr  nz,+_
+    ld  a,(ix+9)
+    ld  b,a
+    and a,$0F
+    cp  a,MAXPRGROM_HINIB+1
+    jp  nc,err_PRGROMTooLarge
+    ld  h,a
+    ld  a,b
+    and a,$F0
+    rlca
+    rlca
+    rlca
+    rlca
+    cp  a,MAXCHRROM_HINIB+1
+    jp  nc,err_CHRROMTooLarge
+    ld  d,a
+_:  xor a,a
+    ld  (prg_rom_size),a
+    ld  (chr_rom_size),a
+    add hl,hl   ;x2
+    add hl,hl   ;x4
+    add hl,hl   ;x8
+    add hl,hl   ;x16
+    add hl,hl   ;x32
+    add hl,hl   ;x64
+    ld.s (prg_rom_size+1),hl    ;x64x256
+    ex  de,hl
+    add hl,hl   ;x2
+    add hl,hl   ;x4
+    add hl,hl   ;x8
+    add hl,hl   ;x16
+    add hl,hl   ;x32
+    ld.s (chr_rom_size+1),hl    ;x32x256
+    ld  hl,(chr_rom_size)
+    ld  de,(prg_rom_size)
+    add hl,de
+    ld  de,(total_rom_size)
+    or  a,a
+    sbc hl,de   ;declared-actual. declared must be equal to or smaller.
+    jr  z,+_
+    jp  nc,err_missingROMDetected
+_:      
+
+
+
+    
+
+
+
+
+
+
+
+loadROMFile_tempSig:    ;total 23 bytes
+.db "CENRO2",0
+loadROMFile_tempSigHash:
+.db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ;16 bytes for hash
+
+
 ;Input: IY = locationOfSignature. 
 ;       BC=size of signature (long load to clear BCU), still limited to 255.
 ;Output: carry=1: Variable not found.
@@ -211,9 +455,10 @@ vatTraverse_loop:
     lea de,ix+0
     or  a,a
     sbc hl,de   ;HL<DE while in pVAT, else carry set.
+    ccf
     ret c
     ld  a,(de)
-    and a,$0F
+    and a,$1F
     cp  a,AppVarObj
     jr  nz,vatTraverse_skip
     ld  de,(ix-7)   ;puts "page" byte in DEU
@@ -250,10 +495,11 @@ vatTraverse_sigNoMatch:
 vatTraverse_continue:
 vatTraverse_skip:
     ld  a,7
-    ld  de,0
+    ld  de,-1
     add a,(ix-6)
+    neg
     ld  e,a
-    sbc ix,de
+    add ix,de   ;because "sbc ix,de" isn't a thing. Boo.
     jr  vatTraverse_loop
 
 
