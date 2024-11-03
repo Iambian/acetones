@@ -46,13 +46,23 @@ missing_files       .equ basefile_sig+3     ;1b
 total_rom_size      .equ missing_files+1    ;3b
 prg_rom_size        .equ total_rom_size+3   ;3b
 chr_rom_size        .equ prg_rom_size+3     ;3b
+submapper           .equ chr_rom_size+3     ;1b. iNES2 thing. Not often used.
+ines_flag_6         .equ submapper+1        ;1b. Flags that a mapper may need.
+mapper_id           .equ ines_flag_6+1      ;3b. Convenience load for 12 bits
+mapper_adr_base     .equ mapper_id+1        ;3b. Used to load mapper
+trainer_base        .equ mapper_adr_base+3  ;3b. If exist, starts here
+prg_rom_base        .equ prg_rom_base+3     ;3b. Adjusted in case of trainer.
+chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
+chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
 
 MAXPRGROM_HINIB     .equ 1
 MAXCHRROM_HINIB     .equ 3
+NUMBER_OF_MAPPERS   .equ 1
+MAPPER_STRIDE       .equ 9
 
 MAXNUMFILES         .equ 1                  ;set to 32 later. that's like 1.5MB
 FILETABLE_STRIDE    .equ 8
-FILETABLE           .equ total_rom_size+3      ;(MAXNUMFILES*FILETABLE_STRIDE)b
+FILETABLE           .equ chr_rom_base_file+3   ;(MAXNUMFILES*FILETABLE_STRIDE)b
 FILE_SIZE_OFFSET    .equ 0
 FILE_ADR_OFFSET     .equ 2
 FILE_SIG_ADR_OFFSET .equ 5

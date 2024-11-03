@@ -270,6 +270,10 @@ err_ROMHeaderDamaged:
     call err_err
 .db "INES ROM header damaged.",0
 
+err_MapperOutOfRange:
+    call err_err
+.db "Mapper specified out of range.",0
+
 
 ;Input: DE = Address of first file after the container header signature
 ;Outputs: ROM vectors recorded and ready to map
@@ -416,13 +420,101 @@ _:  xor a,a
     sbc hl,de   ;declared-actual. declared must be equal to or smaller.
     jr  z,+_
     jp  nc,err_missingROMDetected
-_:      
-
-
-
+_:  ;Find trainer, PRG, and CHR base addresses
+    nop
     
 
 
+
+
+
+    ;Detect mapper and run it
+    ld  a,(ix+6)
+    ld  b,(ix+7)
+    rlca
+    rlca
+    rlca
+    rlca
+    xor a,b
+    and a,$0F
+    xor a,b
+    ex.s de,hl  ;clears HLU,DEU
+    ld  e,a
+    ld  hl,submapper
+    ld  (hl),0
+    ld  a,b
+    and a,%00001100
+    cp  a,%00001000
+    ld  a,0
+    jr  nz,+_
+    ld  b,(ix+8)
+    ld  a,b
+    rlca
+    rlca
+    rlca
+    rlca
+    and a,$0F
+    ld  (hl),a
+    ld  a,b
+    and a,$0F
+_:  ld  e,a
+    ld  (mapper_id),de
+    ld  hl,-NUMBER_OF_MAPPERS
+    add hl,de
+    jp  c,err_MapperOutOfRange
+    sbc hl,hl
+    add hl,de               ;hl=de. both are mapper IDs
+    ld  L,MAPPER_STRIDE
+    ld  d,L
+    mlt hl                  ;high byte multiply
+    ld  h,L
+    ld  L,0
+    mlt de                  ;low byte multiply
+    add hl,de               ;This is the best 16bit * 8bit I know to do.
+    ld  de,mapper_table
+    add hl,de
+    ld  (mapper_adr_base),hl
+    ld  hl,(hl)
+    jp  (hl)
+
+mapper_table:   ;entries 9 wide
+.dl mapper0_init
+.dl mapper0_read
+.dl mapper0_write
+
+mapper0_init:
+    ;map trainer, if exist
+    bit 2,(ix+6)
+    jr  z,+_
+    lea hl,ix+16
+    ld  e,$70
+    ld  c,2
+    ld  b,c
+    push ix
+        call i6502_map_pages
+    pop ix
+    ld  de,0
+    bit 2,(ix+6)
+    jr  z,+_
+    ld  de,512
+_:  lea hl,ix+16
+    add hl,de       ;puts pointer at PRG_ROM
+    ld  b,$80
+    ld  c,$40
+    ld  a,(prg_rom_size+2)
+    add a,$FF
+    ld  a,(ix+4)    ;prog roms
+    rra             ;if 1, this empties out. Else is nonzero with himem carry
+    jr  z,+_
+    sla c           ;if more than 1 rom pages, map two of them.
+
+
+        
+    ret
+mapper0_read:
+    ret
+mapper0_write:
+    ret
 
 
 
