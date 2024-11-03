@@ -76,18 +76,20 @@ programStart:
 _:  push de
         ld  hl,text003
         call printString
+        ld  b,(ix-6)
+        lea hl,ix-7
+_:      ld  a,(hl)
+        dec hl
+        push hl
+            push bc
+                call PrintBigFont
+            pop bc
+        pop hl
+        djnz -_
+        call newLine
     pop de
-    ld  b,(ix-6)
-    lea hl,ix-7
-_:  ld  a,(hl)
-    dec hl
-    push hl
-        push bc
-            call PrintBigFont
-        pop bc
-    pop hl
-    djnz -_
-    call newLine
+    jr $
+    call loadROMFile
 
 
 
@@ -118,30 +120,6 @@ programExit:
     ld  iy,flags
     ret
 
-loadROM:
-    call _ClrLCDAll
-_:  ld  hl,testFilename
-    call _Mov9ToOP1
-    call _ChkFindSym
-    ret c
-    call _ChkInRam
-    jr  nz,+_
-    call _Arc_Unarc
-    jr  -_
-_:  nop
-    ld  de,9
-    add hl,de
-    ld  e,(hl)
-    add hl,de
-    inc hl
-    call _LoadDEInd_s   ;ld de,(hl) but DE is 16 bit. Then HL+=2.
-    ;HL=start of program data. DE is size of data.
-    ;
-    ;
-    ; TODO: Finish writing this section.
-    ;
-    ;
-    ret
 
 testFilename:
 .db AppVarObj,"NESTEST",0
@@ -273,6 +251,10 @@ err_ROMHeaderDamaged:
 err_MapperOutOfRange:
     call err_err
 .db "Mapper specified out of range.",0
+
+err_CHRROMNotFound:
+    call err_err
+.db "CHR_ROM not found inside file",0
 
 
 ;Input: DE = Address of first file after the container header signature
@@ -421,14 +403,48 @@ _:  xor a,a
     jr  z,+_
     jp  nc,err_missingROMDetected
 _:  ;Find trainer, PRG, and CHR base addresses
-    nop
-    
-
-
-
-
-
-    ;Detect mapper and run it
+    lea hl,ix+16
+    ld  (trainer_base),hl   ;whether it exists or not.
+    ld  de,0
+    bit 2,(ix+6)
+    jr  z,+_
+    ld  de,512
+_:  add hl,de
+    ld  (prg_rom_base),hl
+    ld  iy,FILETABLE
+    ld.s hl,(iy+FILE_SIZE_OFFSET)
+    or  a,a
+    sbc hl,de   ;less possible trainer
+    ld  de,16
+    sbc hl,de   ;less iNES header. Remaining is now size of current file.
+    ex  de,hl   ;curfilesize is now in DE
+    ld  hl,(prg_rom_size)   ;keep subtracting filesize from this until carry.
+    or  a,a
+    sbc hl,de   ;if carry, prg_rom end is inside this file. Undo: HL is offset.
+    ld  c,0     ;0th file current
+    jr  c,loadROMFile_locatedCHRROM
+    ld  a,(inputNumFiles)
+    or  a,a
+    jr  z,loadROMFile_noCHRROMFound
+    ld  b,a
+_:  lea iy,iy+FILETABLE_STRIDE
+    ld.s de,(FILE_SIZE_OFFSET)
+    inc c
+    or  a,a
+    sbc hl,de   ;
+    jr  c,loadROMFile_locatedCHRROM
+    djnz -_
+loadROMFile_noCHRROMFound:
+    jp  err_CHRROMNotFound
+loadROMFile_locatedCHRROM:
+    add hl,de       ;Undid subtract. HL is now offset in current file
+    ld  de,(iy+FILE_ADR_OFFSET) ;so get address inside that file.
+    or  a,a         ;Don't feel like figuring what the add above did to carry
+    sbc hl,de
+    ld  a,c
+    ld  (chr_rom_base),hl
+    ld  (chr_rom_base_file),a
+    ;Detect mapper and run its initializer
     ld  a,(ix+6)
     ld  b,(ix+7)
     rlca
@@ -486,34 +502,29 @@ mapper0_init:
     ;map trainer, if exist
     bit 2,(ix+6)
     jr  z,+_
-    lea hl,ix+16
+    ld  hl,(trainer_base)
     ld  e,$70
     ld  c,2
     ld  b,c
-    push ix
-        call i6502_map_pages
-    pop ix
-    ld  de,0
-    bit 2,(ix+6)
-    jr  z,+_
-    ld  de,512
-_:  lea hl,ix+16
-    add hl,de       ;puts pointer at PRG_ROM
+    call i6502_map_pages
+_:  ld  hl,(prg_rom_size)
+    ld  de,-(16384-1)
+    add hl,de   ;carry if more than 1 16KB segment
+    ld  hl,(prg_rom_base)
     ld  b,$80
+    ld  e,b
     ld  c,$40
-    ld  a,(prg_rom_size+2)
-    add a,$FF
-    ld  a,(ix+4)    ;prog roms
-    rra             ;if 1, this empties out. Else is nonzero with himem carry
-    jr  z,+_
-    sla c           ;if more than 1 rom pages, map two of them.
-
-
-        
+    jr  nc,+_
+    sla c
+_:  call i6502_map_pages
     ret
+
+
 mapper0_read:
+    ld  a,(hl)
     ret
 mapper0_write:
+    ld  (hl),b
     ret
 
 
