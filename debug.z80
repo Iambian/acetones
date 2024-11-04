@@ -19,12 +19,7 @@ dbg_resetScreen:
     call setCurLine
     ret
 
-;Input: ix = core_memory_ix 
-;Output: Text onscreen
-dbg_printLine:
-    push hl \ push bc \ push de \ push ix \ push iy \ push af
-    ld  hl,(ix+CURRENT_OPCODES)
-    ld  (operbuf),hl
+dbg_prepNextLine:
     xor a,a
     ld  (xPos),a
     call calculateScreenPtr
@@ -52,25 +47,74 @@ _:  push de
     ld  (hl),c
     ld  bc,(320*7)-1    ;erase whole line below it to prepare for writing.
     ldir
+    ret
+
+;Input: ix = core_memory_ix 
+;Output: Text onscreen
+dbg_printLine:
+    push hl \ push bc \ push de \ push ix \ push iy \ push af
+    ld  hl,(ix+CURRENT_OPCODES)
+    ld  (operbuf),hl
+    call dbg_prepNextLine
     call newLine
     ld  a,(ix+REGPC+1)
     call printSmallNumPair
     ld  a,(ix+REGPC+0)
     call printSmallNumPair
-    ld  hl,dbg_printLine_str001
-    call printString
-    ld  b,5
-    lea hl,ix+0
-_:  ld  a,(hl)
-    inc hl
-    push bc
-        push hl
-            call printSmallNumPair
-            ld  a,' '
-            call printBigFont
-        pop hl
-    pop bc
-    djnz -_
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'A'
+    call printBigFont
+    ld  a,(ix+REGA)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'X'
+    call printBigFont
+    ld  a,(ix+REGX)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'Y'
+    call printBigFont
+    ld  a,(ix+REGY)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'S'
+    call printBigFont
+    ld  a,(ix+REGSP)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'P'
+    call printBigFont
+    ld  a,(ix+REGSR)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+
+    ;
+;    ld  hl,dbg_printLine_str001
+;    call printString
+;    ld  b,5
+;    lea hl,ix+0
+;_:  ld  a,(hl)
+;    inc hl
+;    push bc
+;        push hl
+;            call printSmallNumPair
+;            ld  a,' '
+;            call printBigFont
+;        pop hl
+;    pop bc
+;    djnz -_
+
     lea hl,iy+0
     ld  (ix+CYCLES_CURRENT),hl
     ld  a,(ix+CYCLES_CURRENT+2)
@@ -113,7 +157,7 @@ _:      pop bc
     ret
 
 dbg_printLine_str001:
-.db " AXYSP ",0
+.db "AXYSP ",0
 
 
 

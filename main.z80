@@ -116,6 +116,11 @@ _:      ld  a,(hl)
 ;    ldir
 
 endCurrentRun:
+    call dbg_prepNextLine
+    call newLine
+    ld  hl,text005
+    call printString
+
     ;call printTextBuf
     call fastCopy
     nop
@@ -214,6 +219,9 @@ text003:
 .db "File found: ",0
 text004:
 .db "ROMFile loaded and ready to run.\n",0
+text005:
+;    0123456789012345678901234567890123456789
+.db "CPU Execution Halted                  ",0
 
 
 .db 7

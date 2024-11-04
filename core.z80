@@ -18,11 +18,11 @@
 #define WAS_NMI_TRIGGERED or  a
 
 #define OPRFLG_C res SF_CARRY,b \ jr nc,$+4 \ set SF_CARRY,b
-#define OPRFLG_V res SF_OVER,b \ jp po,$+5 \ set SF_OVER,b
+#define OPRFLG_V res SF_OVER,b \ jp po,$+6 \ set SF_OVER,b
 #define OPRFLG_Z res SF_ZERO,b \ jr nz,$+4 \ set SF_ZERO,b
 #define OPRFLG_N res SF_NEG,b \ jr nc,$+4 \ set SF_NEG,b
 
-#define FLAGS_ZN ld b,(ix+REGSR) \ add a,a \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
+#define FLAGS_ZN ld b,(ix+REGSR) \ rlc a \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
 #define FLAGS_CZN ld b,(ix+REGSR) \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
 #define FLAGS_VCZN ld b,(ix+REGSR) \ OPRFLG_V \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
 
@@ -70,6 +70,7 @@ i6502Init:
     ;Manual loading below. Uncomment "jp inst6502_jsr" to return to original.
     ;Settings below is to run nestest CPU-only test. The reset vector above
     ;requires a working PPU (and probably APU) to be present.
+    ld  (ix+REGSR),$24      ;because that's what the log wants?
     ld  hl,$C000
     ld  (ix+REGPC),HL
 
@@ -123,20 +124,29 @@ i6502PrepNextPage:
         ld  (ix+CURRENT_OPCODES+1),a
         push de
             push hl
-                inc hl
-                inc e
-                jr  nz,+_
-                ld  d,(ix+REGPC+1)
-                inc d
-                ld  e,BASETABLE_STRIDE
-                mlt de
-                ld  hl,PAGETABLE
-                add hl,de
-                ld  hl,(hl)
-_:              ld  a,(hl)
-                ld  (ix+CURRENT_OPCODES+2),a
-                ;jr $
-                call dbg_printLine
+                push ix
+                    inc hl
+                    inc e
+                    jr  nz,+_
+                    ld  d,(ix+REGPC+1)
+                    inc d
+                    ld  e,BASETABLE_STRIDE
+                    mlt de
+                    ld  hl,PAGETABLE
+                    add hl,de
+                    ld  hl,(hl)
+_:                  ld  a,(hl)
+                    ld  (ix+CURRENT_OPCODES+2),a
+                    ;jr $
+                    push iy
+                        call dbg_printLine
+                    pop iy
+                    lea hl,iy+0
+                    ld  de,26485  ;run until
+                    or  a,a
+                    sbc hl,de
+                    call nc,waituntilnewkeypress
+                pop ix
             pop hl
         pop de
     pop af
@@ -441,7 +451,8 @@ subroutine6502_sbc_combined_end:
 
 subroutine6502_cmp_combined_end:
     ld  a,(ix+REGA)
-    cp  b
+    sub a,b
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp i6502NextLoad
 
@@ -1267,7 +1278,7 @@ inst6502_dec_abs:
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+5
+        jp  m,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1303,7 +1314,7 @@ _:      add hl,bc   ;full address
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+5
+        jp  m,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1322,7 +1333,7 @@ _:  ld  a,(ix+REGSR)
     jr  nz,$+4
     set SF_ZERO,a
     res SF_NEG,a
-    jp  m,$+5
+    jp  m,$+6
     set SF_NEG,a
     ld  (ix+REGSR),a
     ADDCYC(2)
@@ -1407,7 +1418,7 @@ inst6502_inc_abs:
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+5
+        jp  m,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1443,7 +1454,7 @@ _:      add hl,bc   ;full address
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+5
+        jp  m,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -2961,7 +2972,8 @@ _:      ld  d,h         ;save MSB of read address for access controls
 inst6502_cpx_imm:
     ADDCYC(2)
     ld  a,(ix+REGX)
-    cp  (hl)
+    sub a,(hl)
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp  i6502NextLoad
 
@@ -2975,7 +2987,8 @@ inst6502_cpx_zp:
     ld  a,(bc)
     ld  b,a
     ld  a,(ix+REGX)
-    cp  b
+    sub a,b
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp i6502NextLoad
 ;absolute	CPX oper	EC	3	4  
@@ -2997,7 +3010,8 @@ inst6502_cpx_abs:
     pop hl
     ld  b,a
     ld  a,(ix+REGX)
-    cp  b
+    sub a,b
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp i6502NextLoad
 
@@ -3011,7 +3025,8 @@ inst6502_cpx_abs:
 inst6502_cpy_imm:
     ADDCYC(2)
     ld  a,(ix+REGY)
-    cp  (hl)
+    sub a,(hl)
+    ccf
     FLAGS_CZN
     jp  i6502NextLoad
 
@@ -3025,7 +3040,8 @@ inst6502_cpy_zp:
     ld  a,(bc)
     ld  b,a
     ld  a,(ix+REGY)
-    cp  b
+    sub a,b
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp i6502NextLoad
 
@@ -3048,7 +3064,8 @@ inst6502_cpy_abs:
     pop hl
     ld  b,a
     ld  a,(ix+REGY)
-    cp  b
+    sub a,b
+    ccf     ;because the 6502 is strange like that.
     FLAGS_CZN
     jp i6502NextLoad
 
@@ -3300,6 +3317,7 @@ inst6502_jsr:
     add hl,de
     ld  hl,(hl)
     ld  d,a
+    ld  e,0
 _:  ld  b,(hl)
     ;push de to 6502stack
     ld  hl,STACKBASE
@@ -3322,6 +3340,7 @@ inst6502_rts:
     inc l
     ld  d,(hl)
     ld  (ix+REGSP),l
+    inc de
     ld.s (ix+REGPC),de
     ADDCYC(6)
     jp  i6502FirstLoad

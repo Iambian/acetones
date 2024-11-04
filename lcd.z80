@@ -427,7 +427,7 @@ SmallHexFont:
 .db $4C,$24,$2C				;three
 .db $48,$AE,$22				;four
 .db $4E,$8C,$2C				;five
-.db $45,$8E,$AE				;six
+.db $46,$8E,$AE				;six
 .db $4E,$24,$88				;seven
 .db $4E,$AE,$AE				;eight
 .db $4E,$AE,$2C				;nine
