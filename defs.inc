@@ -41,7 +41,7 @@ NAMETABLE2          .equ NAMETABLE1 + 1024
 curScreenBuf        .equ saferam1           ;3b
 linestart           .equ curScreenBuf+3     ;1b
 inputNumFiles       .equ linestart+1        ;1b
-basefile_sig        .equ inputNumFile+1     ;3b pointer to 16b hash
+basefile_sig        .equ inputNumFiles+1    ;3b pointer to 16b hash
 missing_files       .equ basefile_sig+3     ;1b
 total_rom_size      .equ missing_files+1    ;3b
 prg_rom_size        .equ total_rom_size+3   ;3b
@@ -51,10 +51,11 @@ ines_flag_6         .equ submapper+1        ;1b. Flags that a mapper may need.
 mapper_id           .equ ines_flag_6+1      ;3b. Convenience load for 12 bits
 mapper_adr_base     .equ mapper_id+1        ;3b. Used to load mapper
 trainer_base        .equ mapper_adr_base+3  ;3b. If exist, starts here
-prg_rom_base        .equ prg_rom_base+3     ;3b. Adjusted in case of trainer.
+prg_rom_base        .equ mapper_adr_base+3  ;3b. Adjusted in case of trainer.
 chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
 chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
 
+SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
 MAXCHRROM_HINIB     .equ 3
 NUMBER_OF_MAPPERS   .equ 1

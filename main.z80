@@ -40,6 +40,13 @@ programStart:
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
 
+    ld  hl,screenBuf1
+    ld  de,screenBuf1+1
+    ld  bc,(2*240*320)-1
+    ld  (hl),$00
+    ldir
+
+
     ;load reset vectors
     ld  hl,testVectors
     ld  bc,$000101
@@ -69,11 +76,8 @@ programStart:
     ld  bc,0
     ld  c,(iy-1)
     call vatTraverse
-    jr  nc,+_
-    ld  hl,text002
-    call printString
-    jp endCurrentRun
-_:  push de
+    jp  c,err_noContainersFound
+    push de
         ld  hl,text003
         call printString
         ld  b,(ix-6)
@@ -88,9 +92,10 @@ _:      ld  a,(hl)
         djnz -_
         call newLine
     pop de
-    jr $
     call loadROMFile
 
+    ld  hl,text004
+    call printString
 
 
 
@@ -197,10 +202,10 @@ _:  call getkbd_adl
 
 text001:
 .db "Looking up nestest...\n",0
-text002:
-.db "Traverse found no candidates.\n",0
 text003:
 .db "File found: ",0
+text004:
+.db "ROMFile loaded and ready to run.\n",0
 
 
 .db 7
@@ -218,6 +223,10 @@ err_err_quit:
     call waituntilnewkeypress
     call waituntilkeyrelease
     jp programExit
+
+err_noContainersFound:
+    call err_err
+.db "Traverse found no candidates.\n",0
 
 err_missingFiles:
     push af
@@ -268,14 +277,14 @@ _:  cp  (hl)    ;
     inc hl      ;
     jr  nz,-_   ;skips past zero-terminated string containing full ROM name
     ld  (basefile_sig),hl
-    ld  bc,16
+    ld  bc,SIZEOF_INTEGRITY_HASH
     add hl,bc
     ld  a,(hl)
     cp  a,MAXNUMFILES
     jp  nc,err_tooManyFiles
     ld  (inputNumFiles),a
     ld  b,a
-    ld  c,16
+;    ld  c,SIZEOF_INTEGRITY_HASH     ;c already set to this value from earlier.
     mlt bc
     inc hl
     push hl
@@ -340,9 +349,11 @@ _:  ld.s de,(ix+FILE_SIZE_OFFSET)
     ld  (total_rom_size),hl
     ;Verify that the file actually contains an INES header.
     ;TODO: Do this at an earlier stage. Such as file selection.
+    ld  ix,(FILETABLE+FILE_ADR_OFFSET)
     ld  hl,(ix+0)
-    ld  de,-$53454E         ;4E 45 53 == "NES"
-    add hl,de
+    ld  de,$53454E         ;4E 45 53 == "NES"
+    or  a,a
+    sbc hl,de   ;Note: add does not affect zero flag. Can't test this via -DE
 _:  jp  nz,err_ROMHeaderDamaged
     ld  a,(ix+3)
     cp  a,$1A
@@ -439,8 +450,7 @@ loadROMFile_noCHRROMFound:
 loadROMFile_locatedCHRROM:
     add hl,de       ;Undid subtract. HL is now offset in current file
     ld  de,(iy+FILE_ADR_OFFSET) ;so get address inside that file.
-    or  a,a         ;Don't feel like figuring what the add above did to carry
-    sbc hl,de
+    add hl,de
     ld  a,c
     ld  (chr_rom_base),hl
     ld  (chr_rom_base_file),a
@@ -473,7 +483,7 @@ loadROMFile_locatedCHRROM:
     ld  (hl),a
     ld  a,b
     and a,$0F
-_:  ld  e,a
+_:  ld  d,a
     ld  (mapper_id),de
     ld  hl,-NUMBER_OF_MAPPERS
     add hl,de
@@ -508,7 +518,7 @@ mapper0_init:
     ld  b,c
     call i6502_map_pages
 _:  ld  hl,(prg_rom_size)
-    ld  de,-(16384-1)
+    ld  de,-(16384+1)
     add hl,de   ;carry if more than 1 16KB segment
     ld  hl,(prg_rom_base)
     ld  b,$80
