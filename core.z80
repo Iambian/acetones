@@ -66,7 +66,12 @@ i6502Init:
     ld  hl,(hl)
     ld  de,$0000FC
     add hl,de
-    jp inst6502_jsr
+    ;jp inst6502_jsr
+    ;Manual loading below. Uncomment "jp inst6502_jsr" to return to original.
+    ;Settings below is to run nestest CPU-only test. The reset vector above
+    ;requires a working PPU (and probably APU) to be present.
+    ld  hl,$C000
+    ld  (ix+REGPC),HL
 
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
@@ -95,6 +100,10 @@ i6502NextLoad:
     ld  e,0         ;PCL known to be zero at this point.
 i6502FinishLoad:
     ld  a,(hl)
+#ifdef COREDEBUG
+    ld  (ix+CURRENT_OPCODES+0),a
+    ld  (ix+REGPC+0),e
+#endif
     inc hl
     inc e
     jr  nz,i6502PrepNextPage
@@ -108,6 +117,30 @@ i6502FinishLoad:
     ld  hl,(hl)
     ld  e,0
 i6502PrepNextPage:
+#ifdef COREDEBUG
+    push af
+        ld  a,(hl)
+        ld  (ix+CURRENT_OPCODES+1),a
+        push de
+            push hl
+                inc hl
+                inc e
+                jr  nz,+_
+                ld  d,(ix+REGPC+1)
+                inc d
+                ld  e,BASETABLE_STRIDE
+                mlt de
+                ld  hl,PAGETABLE
+                add hl,de
+                ld  hl,(hl)
+_:              ld  a,(hl)
+                ld  (ix+CURRENT_OPCODES+2),a
+                ;jr $
+                call dbg_printLine
+            pop hl
+        pop de
+    pop af
+#endif
     push hl
         ld  h,a
         ld  l,BASETABLE_STRIDE

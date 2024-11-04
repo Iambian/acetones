@@ -73,17 +73,20 @@ FILE_SIG_ADR_OFFSET .equ 5
 ;
 ;
 
+;Undefine this to speed up core process by losing debug state
+#define COREDEBUG
 
-
-
-
+;core memory
 #define REGA 0
 #define REGX 1
 #define REGY 2
 #define REGSP 3
 #define REGSR 4
 #define REGPC 5
-#define CYCLES_REMAIN ix+8
+#define CYCLES_REMAIN 8
+#define CYCLES_CURRENT 11
+#define CURRENT_OPCODES 14
+;flag IDs
 #define SF_NEG 7
 #define SF_OVER 6 
 #define SF_RESERVED 5 

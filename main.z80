@@ -46,6 +46,12 @@ programStart:
     ld  (hl),$00
     ldir
 
+    ;Makes sure all non-ROM areas have a mapping
+    ld  hl,scrap_mapping
+    ld  bc,$008001
+    ld  e,0
+    call i6502_map_pages
+
 
     ;load reset vectors
     ld  hl,testVectors
@@ -97,9 +103,11 @@ _:      ld  a,(hl)
     ld  hl,text004
     call printString
 
-
-
-    ;call i6502Init
+    ;jr $
+#ifdef COREDEBUG
+    call dbg_resetScreen
+#endif
+    call i6502Init
 
 ;    call clearTextBuf
 ;    ld  hl,helloWorld
@@ -521,6 +529,7 @@ _:  ld  hl,(prg_rom_size)
     ld  de,-(16384+1)
     add hl,de   ;carry if more than 1 16KB segment
     ld  hl,(prg_rom_base)
+    ;jr  $
     ld  b,$80
     ld  e,b
     ld  c,$40
@@ -619,4 +628,5 @@ vatTraverse_skip:
 
 #include "lcd.z80"
 #include "core.z80"
+#include "debug.z80"
 .echo "Main program size: ",$-programStart

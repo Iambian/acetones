@@ -16,7 +16,8 @@
 ; printString - HL=address to string. destroys all.
 ; printBigFont - A=ASCII char to print at xPos,yPos. Advances xPos by 1.
 ; printSmallNumPair - A=0-255 to print at xPos,Ypos. Advances xPos by 1.
-; calculateScreenPtr - Converts xPos,yPos into screen buffer address.
+; calculateScreenPtr - Converts xPos,yPos into HL= screen buffer address.
+; calculateScreenPtrDE - Converts E=xPos,D=yPos into HL= screen buffer address.
 ;
 ;
 ;
@@ -167,7 +168,10 @@ newLine:
     ld  (xPos),a
     ld  a,(yPos)
     inc a
-    ld  (yPos),a
+    cp  30
+    jr  c,+_
+    xor a,a
+_:  ld  (yPos),a
     ret
 
     
@@ -289,6 +293,7 @@ calculateScreenPtr:
     ;ycoord: 320 * 8 * y
     ;coord: (8x)+320*8y -> 8(x+320y)
     ld  de,(xPos)
+calculateScreenPtrDE:
     ld  L,d     ;yPos
     ld  h,160
     mlt hl
