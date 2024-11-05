@@ -6,6 +6,11 @@
 ;
 ;
 
+DEBUG_PRINT_START_CYCLE .equ 9000
+DEBUG_STEP_START_CYCLE  .equ 26485
+
+
+
 FONTFGCOLOR .EQU $FF
 FONTBGCOLOR .EQU $00
 
@@ -54,6 +59,7 @@ trainer_base        .equ mapper_adr_base+3  ;3b. If exist, starts here
 prg_rom_base        .equ mapper_adr_base+3  ;3b. Adjusted in case of trainer.
 chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
 chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
+timings_base        .equ chr_rom_base_file+1    ;3b. Current pointer to timings
 
 SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
@@ -63,11 +69,10 @@ MAPPER_STRIDE       .equ 9
 
 MAXNUMFILES         .equ 1                  ;set to 32 later. that's like 1.5MB
 FILETABLE_STRIDE    .equ 8
-FILETABLE           .equ chr_rom_base_file+3   ;(MAXNUMFILES*FILETABLE_STRIDE)b
+FILETABLE           .equ timings_base+3   ;(MAXNUMFILES*FILETABLE_STRIDE)b
 FILE_SIZE_OFFSET    .equ 0
 FILE_ADR_OFFSET     .equ 2
 FILE_SIG_ADR_OFFSET .equ 5
-
 
 
 ;

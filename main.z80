@@ -100,6 +100,31 @@ _:      ld  a,(hl)
     pop de
     call loadROMFile
 
+    ;REMOVE THE FOLLOWING BLOCK WHEN DONE TESTING NESTEST
+    ;
+    ;
+    ld  hl,timings_file
+    call _Mov9ToOP1
+    call _ChkFindSym
+    jp  c,endCurrentRun
+    call _ChkInRam
+    ex  de,hl
+    jr  nc,+_
+    ld  de,9
+    add hl,de
+    ld  e,(hl)
+    add hl,de
+    inc hl
+_:  ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (timings_base),hl
+    ;
+    ;
+    ;
+
+
     ld  hl,text004
     call printString
 
@@ -212,6 +237,8 @@ _:  call getkbd_adl
 	jr  z,-_
     ret
 
+timings_file:
+.db AppVarObj,"timings",0
 
 text001:
 .db "Looking up nestest...\n",0

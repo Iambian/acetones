@@ -23,8 +23,8 @@
 #define OPRFLG_N res SF_NEG,b \ jr nc,$+4 \ set SF_NEG,b
 
 #define FLAGS_ZN ld b,(ix+REGSR) \ rlc a \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
-#define FLAGS_CZN ld b,(ix+REGSR) \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
-#define FLAGS_VCZN ld b,(ix+REGSR) \ OPRFLG_V \ OPRFLG_C \ add a,a  \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
+#define FLAGS_CZN ld b,(ix+REGSR) \ OPRFLG_C \ rlc a  \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
+#define FLAGS_VCZN ld b,(ix+REGSR) \ OPRFLG_V \ OPRFLG_C \ rlc a \ OPRFLG_Z \ OPRFLG_N \ ld (ix+REGSR),b
 
 
 ;Modify later to include provisions for hardware i/o based on page
@@ -54,7 +54,6 @@ i6502Init:
     ld  e,$20
     call i6502_map_pages
     ld  iy,2    ;8 cycle startup. Hooking into inst6502_jsr for init
-    ld  ix,core_memory_ix
     lea hl,ix-128
     lea de,ix-127
     ld  bc,255
@@ -66,6 +65,7 @@ i6502Init:
     ld  hl,(hl)
     ld  de,$0000FC
     add hl,de
+    ld  ix,core_memory_ix
     ;jp inst6502_jsr
     ;Manual loading below. Uncomment "jp inst6502_jsr" to return to original.
     ;Settings below is to run nestest CPU-only test. The reset vector above
@@ -73,6 +73,7 @@ i6502Init:
     ld  (ix+REGSR),$24      ;because that's what the log wants?
     ld  hl,$C000
     ld  (ix+REGPC),HL
+    ld  iy,7
 
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
@@ -137,12 +138,18 @@ i6502PrepNextPage:
                     ld  hl,(hl)
 _:                  ld  a,(hl)
                     ld  (ix+CURRENT_OPCODES+2),a
+                    lea hl,ix
+                    ld  de,core_memory_ix
+                    or  a,a
+                    sbc hl,de
+                    jr  nz,$    ;halt program if IX is not core_memory_ix
                     ;jr $
                     push iy
                         call dbg_printLine
                     pop iy
+                    ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
                     lea hl,iy+0
-                    ld  de,26485  ;run until
+                    ld  de,DEBUG_STEP_START_CYCLE
                     or  a,a
                     sbc hl,de
                     call nc,waituntilnewkeypress
@@ -1154,6 +1161,7 @@ inst6502_tya:
 ;    -	-	-	-	-	-
 ;implied	PHA	48	1	3 
 inst6502_pha:
+    ADDCYC(3)
     ld  a,(ix+REGA)
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
@@ -1170,6 +1178,7 @@ inst6502_pha:
 ;    -	-	-	-	-	-
 ;implied	PHP	08	1	3  
 inst6502_php:
+    ADDCYC(3)
     ld  a,(ix+REGSR)
     or  a,%00110000
     ld  bc,STACKBASE
@@ -1187,6 +1196,7 @@ inst6502_php:
 ;    +	+	-	-	-	-
 ;implied	PLA	68	1	4  
 inst6502_pla:
+    ADDCYC(4)
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
     inc c
@@ -1204,6 +1214,7 @@ inst6502_pla:
 ;    from stack
 ;implied	PLP	28	1	4  
 inst6502_plp:
+    ADDCYC(4)
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
     inc c
@@ -1278,7 +1289,7 @@ inst6502_dec_abs:
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+6
+        jp  p,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1314,7 +1325,7 @@ _:      add hl,bc   ;full address
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+6
+        jp  p,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1333,7 +1344,7 @@ _:  ld  a,(ix+REGSR)
     jr  nz,$+4
     set SF_ZERO,a
     res SF_NEG,a
-    jp  m,$+6
+    jp  p,$+6
     set SF_NEG,a
     ld  (ix+REGSR),a
     ADDCYC(2)
@@ -1418,7 +1429,7 @@ inst6502_inc_abs:
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+6
+        jp  p,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1454,7 +1465,7 @@ _:      add hl,bc   ;full address
         jr  nz,$+4
         set SF_ZERO,a
         res SF_NEG,a
-        jp  m,$+6
+        jp  p,$+6
         set SF_NEG,a
         ld  (ix+REGSR),a
         ;
@@ -1600,6 +1611,7 @@ inst6502_adc_indx:
 
 ;(indirect),Y	ADC (oper),Y	71	2	5* 
 inst6502_adc_indy:
+    ADDCYC(5)
     push hl
         ld  a,(hl)
         ld  hl,ZEROPAGE
@@ -1760,6 +1772,7 @@ inst6502_sbc_indx:
 
 ;(indirect),Y	SBC (oper),Y	F1	2	5* 
 inst6502_sbc_indy:
+    ADDCYC(5)
     push hl
         ld  a,(hl)
         ld  hl,ZEROPAGE
@@ -2340,7 +2353,9 @@ _:      ld  d,h         ;save MSB of read address for access controls
 ;accumulator	ASL A	0A	1	2  
 inst6502_asl:
     ADDCYC(2)
-    sla (ix+REGA)
+    ld  a,(ix+REGA)
+    sla a
+    ld  (ix+REGA),a
     FLAGS_CZN
     jp i6502FinishLoad
 
@@ -2387,12 +2402,13 @@ inst6502_asl_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(hl)
+        sla a
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(hl)
-    sla a
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;absolute,X	ASL oper,X	1E	3	7  
@@ -2415,12 +2431,13 @@ inst6502_asl_absx:
         inc d
 _:      add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(hl)
+        sla a
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(hl)
-    sla a
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -2433,7 +2450,9 @@ _:      add hl,bc   ;full address
 ;accumulator	LSR A	4A	1	2  
 inst6502_lsr:
     ADDCYC(2)
-    srl (ix+REGA)
+    ld  a,(ix+REGA)
+    srl a
+    ld  (ix+REGA),a
     FLAGS_CZN
     jp i6502FinishLoad
 
@@ -2480,12 +2499,13 @@ inst6502_lsr_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(hl)
+        srl a
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(hl)
-    srl a
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;absolute,X	LSR oper,X	5E	3	7  
@@ -2508,12 +2528,14 @@ inst6502_lsr_absx:
         inc d
 _:      add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(hl)
+        srl a
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(hl)
-    srl a
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
+
     jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -2528,7 +2550,8 @@ inst6502_rol:
     ADDCYC(2)
     ld  a,(ix+REGSR)
     rra
-    rl (ix+REGA)
+    rl  (ix+REGA)
+    ld  a,(ix+REGA)
     FLAGS_CZN
     jp i6502FinishLoad
 
@@ -2579,14 +2602,15 @@ inst6502_rol_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(ix+REGSR)
+        rra
+        ld  a,(hl)
+        rla
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(ix+REGSR)
-    rra
-    ld  a,(hl)
-    rla
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;absolute,X	ROL oper,X	3E	3	7  
@@ -2609,14 +2633,15 @@ inst6502_rol_absx:
         inc d
 _:      add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(ix+REGSR)
+        rra
+        ld  a,(hl)
+        rla
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(ix+REGSR)
-    rra
-    ld  a,(hl)
-    rla
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -2632,6 +2657,7 @@ inst6502_ror:
     ld  a,(ix+REGSR)
     rra
     rr  (ix+REGA)
+    ld  a,(ix+REGA)
     FLAGS_CZN
     jp i6502FinishLoad
 
@@ -2682,14 +2708,15 @@ inst6502_ror_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(ix+REGSR)
+        rra
+        ld  a,(hl)
+        rra
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(ix+REGSR)
-    rra
-    ld  a,(hl)
-    rra
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;absolute,X	ROR oper,X	7E	3	7  
@@ -2712,14 +2739,15 @@ inst6502_ror_absx:
         inc d
 _:      add hl,bc   ;full address
         READ_ACCESS
+        ld  a,(ix+REGSR)
+        rra
+        ld  a,(hl)
+        rra
+        ld  c,a
+        FLAGS_CZN
+        ld  b,c
+        WRITE_ACCESS
     pop hl
-    ld  a,(ix+REGSR)
-    rra
-    ld  a,(hl)
-    rra
-    ld  b,a
-    FLAGS_CZN
-    WRITE_ACCESS
     jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -2734,6 +2762,7 @@ _:      add hl,bc   ;full address
 ;addressing	assembler	opc	bytes	cycles
 ;implied	CLC	18	1	2  
 inst6502_clc:
+    ADDCYC(2)
     res SF_CARRY,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2744,6 +2773,7 @@ inst6502_clc:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	CLD	D8	1	2  
 inst6502_cld:
+    ADDCYC(2)
     res SF_DEC,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2754,6 +2784,7 @@ inst6502_cld:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	CLI	58	1	2  
 inst6502_cli:
+    ADDCYC(2)
     res SF_INT,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2764,6 +2795,7 @@ inst6502_cli:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	CLV	B8	1	2  
 inst6502_clv:
+    ADDCYC(2)
     res SF_OVER,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2774,6 +2806,7 @@ inst6502_clv:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	SEC	38	1	2  
 inst6502_sec:
+    ADDCYC(2)
     set SF_CARRY,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2784,6 +2817,7 @@ inst6502_sec:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	SED	F8	1	2  
 inst6502_sed:
+    ADDCYC(2)
     set SF_DEC,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -2794,6 +2828,7 @@ inst6502_sed:
 ;addressing	assembler	opc	bytes	cycles
 ;implied	SEI	78	1	2  
 inst6502_sei:
+    ADDCYC(2)
     set SF_INT,(ix+REGSR)
     jp  i6502FinishLoad
 
@@ -3369,13 +3404,15 @@ inst6502_bit_zp:
     add a,c
     ld  c,a
     ld  a,(bc)
+    ld  c,a
 _:  and a,(ix+REGA)
+    ld  a,c     ;discard result, get bits from OPERANDs
     res SF_ZERO,a
     jr  nz,$+4
     set SF_ZERO,a
-    ld  b,(ix+REGSR)
+    ld  b,(ix+REGSR)    ;keep bits in flag other than NZ and V
     xor a,b
-    and a,%11000010
+    and a,%11000010     ;1=keepA, 0=discardA,keepB
     xor a,b
     ld  (ix+REGSR),a
     jp  i6502NextLoad
@@ -3396,6 +3433,7 @@ inst6502_bit_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
+        ld  c,a
     pop hl
     jr  -_    
 
@@ -3539,7 +3577,7 @@ inst6502_instruction_set:
 .dl	inst6502_and_absx				;3D
 .dl	inst6502_rol_absx				;3E
 .dl	inst6502_			;3F
-.dl	inst6502_rts					;40
+.dl	inst6502_rti					;40
 .dl	inst6502_eor_indx				;41
 .dl	inst6502_			;42
 .dl	inst6502_			;43

@@ -255,8 +255,10 @@ printSmallNumPair_1stHalf:
     ld  a,(de)
     ld  b,4
 _:  add a,a
+smallFontBGColor_var .equ $+1
     ld  (hl),FONTBGCOLOR
     jr  nc,$+4
+smallFontFGColor_var .equ $+1
     ld  (hl),FONTFGCOLOR
     inc hl
     djnz -_

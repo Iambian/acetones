@@ -34,7 +34,12 @@ dbg_prepNextLine:
     ld  hl,-(320*240)+0
 _:  add hl,de   ;HL set to other buffer. DE points to current buffer.
     ld  bc,320*8    ;copy one line from other buffer to current buffer.
-    ldir
+_:  ld  a,(hl)
+    add a,1     ;carry if $FF (white), NC if not
+    sbc a,a     ;if carry, returns to $FF, else is black
+    ld  (hl),a
+    ldi
+    jp  pe,-_
     ld  a,(yPos)
     cp  a,29
     jr  nz,+_
@@ -53,6 +58,16 @@ _:  push de
 ;Output: Text onscreen
 dbg_printLine:
     push hl \ push bc \ push de \ push ix \ push iy \ push af
+    lea hl,iy+0
+    ld  (ix+CYCLES_CURRENT),hl
+    ld  de,DEBUG_PRINT_START_CYCLE
+    or  a,a
+    sbc hl,de
+    jp  c,dbg_printLine_noPrint
+
+    ld  a,$1A   ;blue
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
     ld  hl,(ix+CURRENT_OPCODES)
     ld  (operbuf),hl
     call dbg_prepNextLine
@@ -115,8 +130,6 @@ dbg_printLine:
 ;    pop bc
 ;    djnz -_
 
-    lea hl,iy+0
-    ld  (ix+CYCLES_CURRENT),hl
     ld  a,(ix+CYCLES_CURRENT+2)
     call printSmallNumPair
     ld  a,(ix+CYCLES_CURRENT+1)
@@ -151,13 +164,71 @@ _:      pop bc
     ld  a,' '
     call printBigFont
     call dbg_printDisassembly
+
+    ;
+    ;Remove section below when done testing nestest for timings
+    ;
+
+    ld  de,0
+    ld  hl,(timings_base)
+    ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (timings_base),hl
+    ld  hl,(ix+CYCLES_CURRENT)
+    or  a,a
+    sbc hl,de
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_timeMismatch
+    call printString
+_:  ;
+    ;End debug-debug section
+    ;
     call fastCopy
+    xor a,a     ;black
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
+
     pop af \ pop iy \ pop ix \ pop de \ pop bc \ pop hl
     ;push hl \ push bc \ push de \ push ix \ push iy \ push af
     ret
 
+dbg_printLine_noPrint:
+    ;also remove this when done timing debugging
+    ld  de,0
+    ld  hl,(timings_base)
+    ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (timings_base),hl
+    ld  hl,(ix+CYCLES_CURRENT)
+    or  a,a
+    sbc hl,de
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_timeMismatch
+    call printString
+_:  ;
+    ;End debug-debug section
+    ;
+    call fastCopy
+    xor a,a     ;black
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
+    pop af \ pop iy \ pop ix \ pop de \ pop bc \ pop hl
+    ret
+
 dbg_printLine_str001:
 .db "AXYSP ",0
+dbg_printLine_timeMismatch:
+.db "CPU Test timing mismatch.",0
 
 
 
