@@ -74,6 +74,7 @@ i6502Init:
     ld  hl,$C000
     ld  (ix+REGPC),HL
     ld  iy,7
+    ld  (ix+REGSP),$FD
 
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
@@ -436,6 +437,89 @@ subroutine6502_abs_split_start:
 _:  ld  b,(hl)
     ret
 
+#define PUSH_ABSXSPLIT call subroutine6502_absx_split_start
+#define PUSH_ABSXSPLIT_NODEP call subroutine6502_absx_ss_noDep
+#define PUSH_ABSYSPLIT call subroutine6502_absy_split_start
+#define PUSH_ABSYSPLIT_NODEP call subroutine6502_absy_ss_noDep
+
+subroutine6502_absy_split_start:
+    ld  c,(ix+REGY)
+    jr +_
+
+subroutine6502_absx_split_start:
+    ld  c,(ix+REGX)
+_:  ld  a,(hl)
+    inc hl
+    inc e
+    jr nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mlt de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl) ;
+    ld  e,0
+_:  ld  b,(hl)
+    ex  (sp),hl ;save HL onto stack as if we'd pushed HL from the caller
+    push hl     ;return address back onto stack. HL is now free to be anything.
+        add a,c
+        jr  nc,+_
+        ADDCYC(1)
+        inc b
+_:      ld  d,b ;save that high byte for read/write access macros
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+    ret
+    
+subroutine6502_absy_ss_noDep:
+    ld  c,(ix+REGY)
+    jr +_
+subroutine6502_absx_ss_noDep:
+    ld  c,(ix+REGX)
+_:  ld  a,(hl)
+    inc hl
+    inc e
+    jr nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  e,BASETABLE_STRIDE
+    mlt de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl) ;
+    ld  e,0
+_:  ld  b,(hl)
+    ex  (sp),hl ;save HL onto stack as if we'd pushed HL from the caller
+    push hl     ;return address back onto stack. HL is now free to be anything.
+        add a,c
+        jr  nc,+_
+        inc b
+_:      ld  d,b ;save that high byte for read/write access macros
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+    ret
+
+
+
+
+
+
+
 subroutine6502_adc_combined_end:
     ld  a,(ix+REGSR)   ;flags register
     rra             ;gets b0 (6502 carry) into (Z80) carry flag.
@@ -557,53 +641,21 @@ inst6502_lda_abs:
 
 ;absolute,X	LDA oper,X	BD	3	4* 
 inst6502_lda_absx:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(4)
+    PUSH_ABSXSPLIT
         READ_ACCESS
         ld (ix+REGA),a
         FLAGS_ZN
-        ADDCYC(4)
     pop hl
     jp i6502NextLoad
 
 ;absolute,Y	LDA oper,Y	B9	3	4* 
 inst6502_lda_absy:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(4)
+    PUSH_ABSYSPLIT
         READ_ACCESS
         ld (ix+REGA),a
         FLAGS_ZN
-        ADDCYC(4)
     pop hl
     jp i6502NextLoad
 
@@ -726,27 +778,11 @@ inst6502_ldx_abs:
 
 ;absolute,Y	LDX oper,Y	BE	3	4* 
 inst6502_ldx_absy:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(4)
+    PUSH_ABSYSPLIT
         READ_ACCESS
         ld (ix+REGX),a
         FLAGS_ZN
-        ADDCYC(4)
     pop hl
     jp i6502NextLoad
 
@@ -812,27 +848,11 @@ inst6502_ldy_abs:
 
 ;absolute,X	LDY oper,X	BC	3	4* 
 inst6502_ldy_absx:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(4)
+    PUSH_ABSXSPLIT
         READ_ACCESS
         ld (ix+REGY),a
         FLAGS_ZN
-        ADDCYC(4)
     pop hl
     jp i6502NextLoad
 
@@ -887,49 +907,19 @@ inst6502_sta_abs:
 
 ;absolute,X	STA oper,X	9D	3	5  
 inst6502_sta_absx:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(5)
+    PUSH_ABSXSPLIT_NODEP
         ld  b,(ix+REGA)
         WRITE_ACCESS
-        ADDCYC(5)
     pop hl
     jp i6502NextLoad
 
 ;absolute,Y	STA oper,Y	99	3	5  
 inst6502_sta_absy:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(5)
+    PUSH_ABSYSPLIT_NODEP
         ld  b,(ix+REGA)
         WRITE_ACCESS
-        ADDCYC(5)
     pop hl
     jp i6502NextLoad
 
@@ -1300,22 +1290,8 @@ inst6502_dec_abs:
 
 ;    absolute,X	DEC oper,X	DE	3	7  
 inst6502_dec_absx:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         dec a
         ld  b,a
@@ -1330,7 +1306,6 @@ _:      add hl,bc   ;full address
         ld  (ix+REGSR),a
         ;
         WRITE_ACCESS
-        ADDCYC(7)
     pop hl
     jp i6502NextLoad
 
@@ -1440,22 +1415,8 @@ inst6502_inc_abs:
 
 ;absolute,X	INC oper,X	FE	3	7  
 inst6502_inc_absx:
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         inc a
         ld  b,a
@@ -1470,7 +1431,6 @@ _:      add hl,bc   ;full address
         ld  (ix+REGSR),a
         ;
         WRITE_ACCESS
-        ADDCYC(7)
     pop hl
     jp i6502NextLoad
 
@@ -1536,23 +1496,7 @@ inst6502_adc_abs:
 ;absolute,X	ADC oper,X	7D	3	4* 
 inst6502_adc_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
     pop hl
     ld  c,a
@@ -1561,23 +1505,7 @@ _:      add hl,bc   ;full address
 ;absolute,Y	ADC oper,Y	79	3	4*
 inst6502_adc_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     ld  c,a
@@ -1697,23 +1625,7 @@ inst6502_sbc_abs:
 ;absolute,X	SBC oper,X	FD	3	4* 
 inst6502_sbc_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
     pop hl
     ld  c,a
@@ -1722,23 +1634,7 @@ _:      add hl,bc   ;full address
 ;absolute,Y	SBC oper,Y	F9	3	4* 
 inst6502_sbc_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        ADDCYC(1)
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     ld  c,a
@@ -1873,50 +1769,18 @@ inst6502_and_abs:
 ;absolute,X	AND oper,X	3D	3	4* 
 inst6502_and_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
+        and a,(ix+REGA)
+        ld  (ix+REGA),A
+        FLAGS_ZN
     pop hl
-    and a,(ix+REGA)
-    ld  (ix+REGA),A
-    FLAGS_ZN
     jp i6502NextLoad
 
 ;absolute,Y	AND oper,Y	39	3	4* 
 inst6502_and_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     and a,(ix+REGA)
@@ -2052,50 +1916,18 @@ inst6502_eor_abs:
 ;absolute,X	EOR oper,X	5D	3	4* 
 inst6502_eor_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
+        xor a,(ix+REGA)
+        ld  (ix+REGA),A
+        FLAGS_ZN
     pop hl
-    xor a,(ix+REGA)
-    ld  (ix+REGA),A
-    FLAGS_ZN
     jp i6502NextLoad
 
 ;absolute,Y	EOR oper,Y	59	3	4* 
 inst6502_eor_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     xor a,(ix+REGA)
@@ -2230,50 +2062,18 @@ inst6502_ora_abs:
 ;absolute,X	ORA oper,X	1D	3	4* 
 inst6502_ora_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
+        or  a,(ix+REGA)
+        ld  (ix+REGA),A
+        FLAGS_ZN
     pop hl
-    or  a,(ix+REGA)
-    ld  (ix+REGA),A
-    FLAGS_ZN
     jp i6502NextLoad
 
 ;absolute,Y	ORA oper,Y	19	3	4* 
 inst6502_ora_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     or  a,(ix+REGA)
@@ -2414,22 +2214,7 @@ inst6502_asl_abs:
 ;absolute,X	ASL oper,X	1E	3	7  
 inst6502_asl_absx:
     ADDCYC(7)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         ld  a,(hl)
         sla a
@@ -2511,22 +2296,7 @@ inst6502_lsr_abs:
 ;absolute,X	LSR oper,X	5E	3	7  
 inst6502_lsr_absx:
     ADDCYC(7)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         ld  a,(hl)
         srl a
@@ -2616,22 +2386,7 @@ inst6502_rol_abs:
 ;absolute,X	ROL oper,X	3E	3	7  
 inst6502_rol_absx:
     ADDCYC(7)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         ld  a,(ix+REGSR)
         rra
@@ -2722,22 +2477,7 @@ inst6502_ror_abs:
 ;absolute,X	ROR oper,X	7E	3	7  
 inst6502_ror_absx:
     ADDCYC(7)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
         ld  a,(ix+REGSR)
         rra
@@ -2895,23 +2635,7 @@ inst6502_cmp_abs:
 ;absolute,X	CMP oper,X	DD	3	4* 
 inst6502_cmp_absx:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGX)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSXSPLIT
         READ_ACCESS
     pop hl
     ld  b,a
@@ -2920,23 +2644,7 @@ _:      add hl,bc   ;full address
 ;absolute,Y	CMP oper,Y	D9	3	4* 
 inst6502_cmp_absy:
     ADDCYC(4)
-    call subroutine6502_abs_split_start
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        add a,(ix+REGY)
-        ld  c,a
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      add hl,bc   ;full address
+    PUSH_ABSYSPLIT
         READ_ACCESS
     pop hl
     ld  b,a
@@ -3277,65 +2985,48 @@ _:  ld  (ix+REGPC+0),a
 ;indirect	JMP (oper)	6C	3	5  
 inst6502_jmp_indir:
     ADDCYC(5)
-    ld  e,(hl)
-    ld  a,e
+    ;Doing much the same as abs_split_start below, except with fewer things
+    ;because we don't need to preserve any of the other stuff.
+    ld  c,(hl)
     inc hl
-    inc a
+    inc e
     jr  nz,+_
-    ld  b,(ix+REGPC+1)
-    inc b
-    ld  c,BASETABLE_STRIDE
-    mlt bc
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld  e,BASETABLE_STRIDE
+    mlt de
     ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+_:  ld  b,(hl)
+    ld  a,c
+    inc c   ;check if there will be a split read.
+    ld  c,BASETABLE_STRIDE  ;Flags not affected
+    mlt bc                  ;Flags not affected
+    ld  hl,PAGETABLE        ;Flags not affected
+    jp  z,inst6502_jmp_indir_splitRead
     add hl,bc
     ld  hl,(hl)
-_:  ld  d,(hl)  ;new 6502 address to read from is loaded from memory
-    inc e
-    jr  z,inst6502_jmp_indir_splitread
-    dec e
-    ld  c,e
-    ld  e,BASETABLE_STRIDE
-    mlt de
-    ld  hl,PAGETABLE
-    add hl,de
+    ld  b,0
+    ld  c,a
+    add hl,bc
     ld  hl,(hl)
-    ld  d,0
-    ld  e,c
-    add hl,de   ;full real address reconstructed.
-    ld  de,(hl)
-    ld.s (ix+REGPC),de
+    ld.s (ix+REGPC),hl
     jp  i6502FirstLoad
-inst6502_jmp_indir_splitread:
-    ;emulating jmp indirect wraparound behavior instead of
-    ;more correct behavior, which tbh, is probably cheaper that way.
-    ld  e,BASETABLE_STRIDE
-    mlt de
-    ld  hl,PAGETABLE
-    add hl,de
+inst6502_jmp_indir_splitRead:
+    add hl,bc
     ld  hl,(hl)
-    ld  d,(hl)
+    ld  a,(hl)  ;high byte
     ld  bc,255
     add hl,bc
-    ld  e,(hl)
-    ld.s (ix+REGPC),de
+    ld  c,(hl)  ;low byte
+    ld  b,a
+    ld.s (ix+REGPC),bc
     jp  i6502FirstLoad
 
-;    ld  e,BASETABLE_STRIDE
-;    mlt de
-;    ld  hl,PAGETABLE
-;    add hl,de
-;    ld  de,(hl) ;
-;    ex  de,hl
-;    ld  bc,255
-;    add hl,bc
-;    ld  a,(hl)  ;first byte at indirect loaded
-;    ex  de,hl
-;    ld  c,BASETABLE_STRIDE  ;yeee
-;    add hl,bc   ;get next page from table w/o need to mlt again.
-;    ld  e,(hl)
-;    ld  d,a
-;    ld.s (ix+REGPC),de
-;    jp  i6502FirstLoad
+
+
+
 
 ;absolute	JSR oper	20	3	6  
 inst6502_jsr:
