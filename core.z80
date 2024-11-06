@@ -2202,7 +2202,6 @@ inst6502_asl_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
-        ld  a,(hl)
         sla a
         ld  c,a
         FLAGS_CZN
@@ -2216,7 +2215,6 @@ inst6502_asl_absx:
     ADDCYC(7)
     PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
-        ld  a,(hl)
         sla a
         ld  c,a
         FLAGS_CZN
@@ -2284,7 +2282,6 @@ inst6502_lsr_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
-        ld  a,(hl)
         srl a
         ld  c,a
         FLAGS_CZN
@@ -2298,14 +2295,12 @@ inst6502_lsr_absx:
     ADDCYC(7)
     PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
-        ld  a,(hl)
         srl a
         ld  c,a
         FLAGS_CZN
         ld  b,c
         WRITE_ACCESS
     pop hl
-
     jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -2372,9 +2367,8 @@ inst6502_rol_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
-        ld  a,(ix+REGSR)
-        rra
-        ld  a,(hl)
+        ld  b,(ix+REGSR)
+        rr b
         rla
         ld  c,a
         FLAGS_CZN
@@ -2388,9 +2382,8 @@ inst6502_rol_absx:
     ADDCYC(7)
     PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
-        ld  a,(ix+REGSR)
-        rra
-        ld  a,(hl)
+        ld  b,(ix+REGSR)
+        rr b
         rla
         ld  c,a
         FLAGS_CZN
@@ -2463,9 +2456,8 @@ inst6502_ror_abs:
         ld  c,a
         add hl,bc   ;full address
         READ_ACCESS
-        ld  a,(ix+REGSR)
-        rra
-        ld  a,(hl)
+        ld  b,(ix+REGSR)
+        rr b
         rra
         ld  c,a
         FLAGS_CZN
@@ -2479,9 +2471,8 @@ inst6502_ror_absx:
     ADDCYC(7)
     PUSH_ABSXSPLIT_NODEP
         READ_ACCESS
-        ld  a,(ix+REGSR)
-        rra
-        ld  a,(hl)
+        ld  b,(ix+REGSR)
+        rr b
         rra
         ld  c,a
         FLAGS_CZN
@@ -3134,16 +3125,26 @@ inst6502_nop:
     ADDCYC(2)
     jp  i6502FinishLoad
 
-;-----------------------------------------------------------------------------
-;-----------------------------------------------------------------------------
-;-----------------------------------------------------------------------------
+
+
+;##############################################################################
+;##############################################################################
+;##############################################################################
+;##-----#-#####-#####-----##---###---##-########-----#--##-##---#-----#----####
+;####-###-#####-#####-#####-#####-###-#-##########-###--##-#-######-###-###-###
+;####-###-#####-#####---###-##--#-----#-##########-###-#-#-##---###-###-----###
+;####-###-#####-#####-#####-###-#-###-#-##########-###-##--#####-##-###-##-####
+;##-----#-----#-----#-----##----#-###-#-----####-----#-##--#----###-###-###-#-#
+;##############################################################################
+;##############################################################################
+;##############################################################################
 ;Instructions by type: Illegal Instructions
 
 ;NOP - No operations. All the no-operations. Even the ones that are linked
 ;to the machinery that operates an addressing mode, but does nothing with it.
 ;A whole lotta nothing.
 
-;Bytes:1, Cycles:2, Opcodes: 1A, 3A, 5A, DA, FA
+;Bytes:1, Cycles:2, Opcodes: 1A, 3A, 5A, 7A, DA, FA
 inst6502_nop_implied:
     ADDCYC(2)
     jp  i6502FinishLoad
@@ -3230,7 +3231,12 @@ _:  res SF_ZERO,a
 ;immediate	ANE #oper	8B	2	2  	††
 instr6502_ane_imm:
     ADDCYC(2)
-    jr  $   ;Don't even try this. Just lock it up and say good night.
+    ld  a,r     ;?? HIGHLY UNSTABLE INSTRUCTION
+    or  a,(ix+REGA)
+    and a,(ix+REGX)
+    and a,(hl)
+    ld  (ix+REGA),a
+    FLAGS_ZN
     jp  i6502NextLoad
 
 ;-----------------------------------------------------------------------------
@@ -3239,6 +3245,7 @@ instr6502_ane_imm:
 ;ARR - AND OPER + ROR
 ;Something hinky is going on with the flags. "This operation involves the adder"
 ;I need to get a better handle over what that might be.
+;CVZN flags affected.
 ;
 ;Primary sources reads:
 ;----------------------
@@ -3257,15 +3264,1440 @@ instr6502_ane_imm:
 ;immediate	ARR #oper	6B	2	2  
 instr6502_arr_imm:
     ADDCYC(2)
-    jr  $
-
-
-
-
+    ld  a,(ix+REGA)
+    and a,(hl)
+    ld  b,a
+    ld  a,(ix+REGSR)
+    ld  c,a
+    rrca    ;extract carry. This carry will go into sign bit of result
+    res SF_NEG,c
+    jr  nc,$+4
+    set SF_NEG,c
+    rr b
+    res SF_ZERO,c
+    jr  nz,$+4
+    set SF_ZERO,c
+    ld  (ix+REGA),b
+    ld  a,b
+    and a,%01000000
+    res SF_CARRY,c
+    jr  z,$+4
+    set SF_CARRY,c
+    rrca
+    xor a,%00100000
+    and a,%00100000
+    res SF_OVER,c
+    jr  z,$+4
+    set SF_OVER,c
+    ld  (ix+REGSR),c
+    ;TODO: Figure out a more efficient way to emulate this instruction.
+    jp  i6502NextLoad
 
 ;-----------------------------------------------------------------------------
+;DCP (DCM) - DEC oper + CMP oper
+;M-1->M, A-M. Affects CZN
+;addressing	assembler	opc	bytes	cycles	
+
+;zeropage	DCP oper	C7	2	5  	
+inst6502_dcp_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    dec a
+    ld  (bc),a
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;zeropage,X	DCP oper,X	D7	2	6  	
+inst6520_dcp_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(bc)
+    dec a
+    ld  (bc),a
+    ld  b,a
+    jp  subroutine6502_cmp_combined_end
+
+;absolute	DCP oper	CF	3	6  	
+inst6502_dcp_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        dec a
+        ld b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_cmp_combined_end
+
+;absolut,X	DCP oper,X	DF	3	7  	
+inst6502_dcp_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        dec a
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_cmp_combined_end
+
+;absolut,Y	DCP oper,Y	DB	3	7  	
+inst6502_dcp_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        dec a
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_cmp_combined_end
+
+;(indirect,X)	DCP (oper,X)	C3	2	8  	
+inst6502_dcp_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        dec a
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_cmp_combined_end
+
+;(indirect),Y	DCP (oper),Y	D3	2	8  
+inst6502_dcp_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        dec a
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_cmp_combined_end
+
 ;-----------------------------------------------------------------------------
+;ISC (ISB, INS) - INC oper + SBC oper
+;M+1->M, A-M-not(C)->A, affects VCZN
+;addressing	assembler	opc	bytes	cycles	
+
+
+
+;zeropage	ISC oper	E7	2	5  	
+inst6502_isc_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    inc a
+    ld  (bc),a
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;zeropage,X	ISC oper,X	F7	2	6  
+inst6520_isc_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(bc)
+    inc a
+    ld  (bc),a
+    ld  c,a
+    jp  subroutine6502_sbc_combined_end
+
+;absolute	ISC oper	EF	3	6  	
+inst6502_isc_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        inc a
+        ld b,a
+        ld c,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_sbc_combined_end
+
+;absolut,X	ISC oper,X	FF	3	7  	
+inst6502_isc_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ld  c,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_sbc_combined_end
+
+;absolut,Y	ISC oper,Y	FB	3	7  	
+inst6502_isc_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ld  c,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_sbc_combined_end
+
+;(indirect,X)	ISC (oper,X)	E3	2	8  	
+inst6502_isc_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ld  c,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_sbc_combined_end
+
+;(indirect),Y	ISC (oper),Y	F3	2	8  
+inst6502_isc_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        inc a
+        ld  b,a
+        ld  c,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+    pop hl
+    jp  subroutine6502_sbc_combined_end
 ;-----------------------------------------------------------------------------
+;LAS (LAR) - LDA/TSX oper
+;M AND SP -> A, X, SP. Affects ZN
+;addressing	assembler	opc	bytes	cycles	
+;absolut,Y	LAS oper,Y	BB	3	4* 
+inst6502_las_absy:
+    ADDCYC(4)
+    PUSH_ABSYSPLIT
+        READ_ACCESS
+    pop hl
+    and a,(ix+REGSP)
+    ld  (ix+REGA),A
+    ld  (ix+REGX),A
+    ld  (ix+REGSP),A
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;LAX - LDA oper + LDX oper
+;M -> A -> X. Flags affected: ZN
+;addressing	assembler	opc	bytes	cycles	
+;zeropage	LAX oper	A7	2	3  	
+inst6502_lax_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;zeropage,Y	LAX oper,Y	B7	2	4  	
+inst6502_lax_zpy:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGY)
+    ld  c,a
+    ld  a,(bc)
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    FLAGS_ZN
+    jp i6502NextLoad
+
+;absolute	LAX oper	AF	3	4  	
+inst6502_lax_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld (ix+REGA),a
+        ld (ix+REGX),a
+        FLAGS_ZN
+    pop hl
+    jp i6502NextLoad
+
+;absolut,Y	LAX oper,Y	BF	3	4* 	
+inst6502_lax_absy:
+    ADDCYC(4)
+    PUSH_ABSYSPLIT
+        READ_ACCESS
+        ld (ix+REGA),a
+        ld (ix+REGX),a
+        FLAGS_ZN
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	LAX (oper,X)	A3	2	6  	
+inst6502_lax_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        ld (ix+REGA),a
+        ld (ix+REGX),a
+        FLAGS_ZN
+    pop hl
+    jp i6502NextLoad
+
+;(indirect),Y	LAX (oper),Y	B3	2	5* 
+inst6502_lax_indy:
+    ADDCYC(5)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        ADDCYC(1)
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        ld  (ix+REGA),a
+        ld  (ix+REGX),a
+        FLAGS_ZN
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;LXA (LAX immediate)
+;Store * AND oper in A and X
+;Highly unstable, involves a 'magic' constant, see ANE
+;(A OR CONST) AND oper -> A -> X
+;immediate	LXA #oper	AB	2	2  	††
+inst6502_lxa:
+    ADDCYC(2)
+    ld  a,r     ;?? HIGHLY UNSTABLE INSTRUCTION
+    or  a,(ix+REGA)
+    and a,(hl)
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    FLAGS_ZN
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;RLA - ROL oper + AND oper
+;M = C <- [76543210] <- C, A AND M -> A. flags CZN
+;addressing	assembler	opc	bytes	cycles	
+;zeropage	RLA oper	27	2	5  	
+inst6502_rla_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(ix+REGSR)
+    rra
+    ld  a,(bc)
+    rla
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    and a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;zeropage,X	RLA oper,X	37	2	6  	
+inst6502_rla_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(ix+REGSR)
+    rra
+    ld  a,(bc)
+    rla
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    and a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;absolute	RLA oper	2F	3	6  	
+inst6502_rla_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rla
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,X	RLA oper,X	3F	3	7  	
+inst6502_rla_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rla
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,Y	RLA oper,Y	3B	3	7  	
+inst6502_rla_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rla
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	RLA (oper,X)	23	2	8  	
+isnt6502_rla_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rla
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;(indirect),Y	RLA (oper),Y	33	2	8  
+inst6502_rla_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rla
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;RRA
+;ROR oper + ADC oper
+;M = C -> [76543210] -> C, A + M + C -> A, C. Affects VCZN
+
+;addressing	assembler	opc	bytes	cycles	
+;zeropage	RRA oper	67	2	5  	
+inst6502_rra_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(ix+REGSR)
+    rra
+    ld  a,(bc)
+    rra
+    ld  (bc),a
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;zeropage,X	RRA oper,X	77	2	6  	
+inst6502_rra_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(ix+REGSR)
+    rra
+    ld  a,(bc)
+    rra
+    ld  (bc),a
+    ld  c,a
+    jp  subroutine6502_adc_combined_end
+
+;absolute	RRA oper	6F	3	6  	
+inst6502_rra_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rra
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+        ld c,b
+    pop hl
+    jp  subroutine6502_adc_combined_end
+
+;absolut,X	RRA oper,X	7F	3	7  	
+inst6502_rra_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rra
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+        ld c,b
+    pop hl
+    jp  subroutine6502_adc_combined_end
+
+;absolut,Y	RRA oper,Y	7B	3	7  	
+inst6502_rra_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rra
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+        ld c,b
+    pop hl
+    jp  subroutine6502_adc_combined_end
+
+;(indirect,X)	RRA (oper,X)	63	2	8  	
+isnt6502_rra_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rra
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+        ld c,b
+    pop hl
+    jp  subroutine6502_adc_combined_end
+
+;(indirect),Y	RRA (oper),Y	73	2	8  
+inst6502_rra_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        ld  b,(ix+REGSR)
+        rr b
+        rra
+        ld  b,a
+        push bc
+            WRITE_ACCESS
+        pop bc
+        ld c,b
+    pop hl
+    jp  subroutine6502_adc_combined_end
+
+;-----------------------------------------------------------------------------
+;SAX (AXS, AAX) - A AND X -> M
+;A and X are put on the bus at the same time (resulting effectively in an 
+;AND operation) and stored in M. Flags not affected.
+;addressing	assembler	opc	bytes	cycles	
+;zeropage	SAX oper	87	2	3  	
+inst6502_sax_zp:
+    ADDCYC(3)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    ld  (bc),a
+    ret
+
+;zeropage,Y	SAX oper,Y	97	2	4  	
+inst6502_sax_zpy:
+    ADDCYC(4)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGY)
+    ld  c,a
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    ld  (bc),a
+    ret
+
+;absolute	SAX oper	8F	3	4  	
+inst6502_sax_abs:
+    ADDCYC(4)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        ld  a,(ix+REGA)
+        and a,(ix+REGX)
+        ld  b,a
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	SAX (oper,X)	83	2	6  
+inst6502_sax_indx:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        ld  a,(ix+REGA)
+        and a,(ix+REGX)
+        ld  b,a
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;SBX (AXS, SAX) - CMP and DEX at once, sets flags like CMP
+;(A AND X) - oper -> X.  Flags affected: CZN
+;addressing	assembler	opc	bytes	cycles	
+;immediate	SBX #oper	CB	2	2  
+inst6502_sbx_imm:
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    sub a,(hl)
+    ld  (ix+REGX),a
+    ccf
+    FLAGS_CZN
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;SHA (AHX, AXA) - Stores A AND X AND (high-byte of addr. + 1) at addr.
+;unstable: sometimes 'AND (H+1)' is dropped, 
+;page boundary crossings may not work 
+;(with the high-byte of the value used as the high-byte of the address)
+;A AND X AND (H+1) -> M
+;addressing	assembler	opc	bytes	cycles	
+;
+;NOTE: NOT GOING TO IMPLEMENT THESE. THEY'LL ADVANCE THE 6502 PC IN THE CORRECT
+;MANNER BUT NOTHING MORE. THE CPU WILL HALT WHEN ENCOUNTERING ONE OF THESE.
+;
+;absolut,Y	SHA oper,Y	9F	3	5  	†
+inst6502_sha_absy:
+    ADDCYC(5)
+    PUSH_ABSYSPLIT
+        jr $
+    pop hl
+    jp i6502NextLoad
+
+;(indirect),Y	SHA (oper),Y	93	2	6  	†
+inst6502_sha_indy:
+    ADDCYC(6)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        jr $
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;SHX (A11, SXA, XAS)
+;SHY (A11, SYA, SAY)
+;TAS (XAS, SHS)
+;Not going to implement these, but they'll still get the program
+;counter to make the correct noises. Right before locking up the core.
+;All of these instructions are marked as "unstable" in that they'll sometimes
+;drop the high byte, and page crossings sometimes won't work.
+
+;absolut,Y	SHX oper,Y	9E	3	5  	†
+inst6502_shx_absy:
+    ADDCYC(5)
+    PUSH_ABSYSPLIT_NODEP
+        jr $
+    pop hl
+    jp i6502NextLoad
+
+;absolut,X	SHY oper,X	9C	3	5  	†
+inst6502_shy_absx:
+    ADDCYC(5)
+    PUSH_ABSXSPLIT_NODEP
+        jr $
+    pop hl
+    jp i6502NextLoad
+
+;absolut,Y	TAS oper,Y	9B	3	5  	†
+inst6502_tas_absy:
+    ADDCYC(5)
+    PUSH_ABSYSPLIT_NODEP
+        jr $
+    pop hl
+    jp i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;SLO (ASO) - ASL oper + ORA oper
+;M = C <- [76543210] <- 0, A OR M -> A. Affects: CZN
+;addressing	assembler	opc	bytes	cycles	
+
+;zeropage	SLO oper	07	2	5  	
+inst6502_slo_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    sla a
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    or  a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;zeropage,X	SLO oper,X	17	2	6  	
+inst6502_slo_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(bc)
+    sla a
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    or  a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;absolute	SLO oper	0F	3	6  	
+inst6502_slo_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        sla a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        or  a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,X	SLO oper,X	1F	3	7  	
+inst6502_slo_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        sla a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        or  a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,Y	SLO oper,Y	1B	3	7  	
+inst6502_slo_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        sla a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        or  a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	SLO (oper,X)	03	2	8  	
+isnt6502_slo_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        sla a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        or  a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;(indirect),Y	SLO (oper),Y	13	2	8  
+inst6502_slo_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        sla a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        and a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;SRE (LSE) - LSR oper + EOR oper
+;M = 0 -> [76543210] -> C, A EOR M -> A. Affects: CZN
+;addressing	assembler	opc	bytes	cycles	
+
+;zeropage	SRE oper	47	2	5  	
+inst6502_sre_zp:
+    ADDCYC(5)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    ld  c,a
+    ld  a,(bc)
+    srl a
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    xor a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;zeropage,X	SRE oper,X	57	2	6  	
+inst6502_sre_zpx:
+    ADDCYC(6)
+    ld  a,(hl)
+    ld  bc,ZEROPAGE
+    add a,c
+    add a,(ix+REGX)
+    ld  c,a
+    ld  a,(bc)
+    srl a
+    ld  (bc),a
+    ;Flag breakdown to optimize for split operation
+    ld  b,(ix+REGSR)
+    OPRFLG_C
+    xor a,(ix+REGA)
+    ld  (ix+REGA),a
+    OPRFLG_Z
+    add a,a
+    OPRFLG_N
+    ld  (ix+REGSR),b
+    jp i6502NextLoad
+
+;absolute	SRE oper	4F	3	6  	
+inst6502_sre_abs:
+    ADDCYC(6)
+    call subroutine6502_abs_split_start
+    push hl
+        ld  d,b
+        ld  a,c
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc   ;full address
+        READ_ACCESS
+        srl a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        xor a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,X	SRE oper,X	5F	3	7  	
+inst6502_sre_absx:
+    ADDCYC(7)
+    PUSH_ABSXSPLIT_NODEP
+        READ_ACCESS
+        srl a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        xor a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;absolut,Y	SRE oper,Y	5B	3	7  	
+inst6502_sre_absy:
+    ADDCYC(7)
+    PUSH_ABSYSPLIT_NODEP
+        READ_ACCESS
+        srl a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        xor a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp i6502NextLoad
+
+;(indirect,X)	SRE (oper,X)	43	2	8  	
+isnt6502_sre_indx:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        add a,(ix+REGX)
+        ld  L,a
+        ld  a,(hl)
+        inc L
+        ld  d,(hl)
+        ld  b,d
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)
+        ld  b,0
+        ld  c,a
+        add hl,bc
+        READ_ACCESS
+        srl a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        xor a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;(indirect),Y	SRE (oper),Y	53	2	8  
+inst6502_sre_indy:
+    ADDCYC(8)
+    push hl
+        ld  a,(hl)
+        ld  hl,ZEROPAGE
+        add a,L
+        ld  L,a
+        ld  a,(hl)      ;LSB. Keep in A for now.
+        inc L
+        add a,(ix+REGY)    ;Adjust LSB for post-idx
+        ld  h,(hl)      ;Retrieve MSB.
+        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
+        inc h
+_:      ld  d,h         ;save MSB of read address for access controls
+        ld  L,BASETABLE_STRIDE
+        mlt hl          ;23.
+        ld  bc,PAGETABLE
+        add hl,bc
+        ld  hl,(hl)     ;address get.
+        ld  bc,0
+        ld  c,a
+        add hl,bc       ;Full address get.
+        READ_ACCESS
+        srl a
+        ld  c,a ;save the result of the rotation. This is written back to mem.
+        ;Split oper
+        ld  b,(ix+REGSR)
+        OPRFLG_C
+        xor a,(ix+REGA)
+        ld  (ix+REGA),a
+        OPRFLG_Z
+        add a,a
+        OPRFLG_N
+        ld  (ix+REGSR),b
+        ld  b,c
+        WRITE_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;USBC (USBC)
+;immediate	USBC #oper	EB	2	2  
+;Map this to instruction $E9 (inst6502_sbc_imm)
+
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
@@ -3319,11 +4751,11 @@ inst6502_instruction_set:
 .dl	inst6502_brk					;00
 .dl	inst6502_ora_indx				;01
 .dl	inst6502_jam_02 				;02
-.dl	inst6502_				;03
+.dl	isnt6502_slo_indx				;03
 .dl	inst6502_nop_zp 				;04
 .dl	inst6502_ora_zp					;05
 .dl	inst6502_asl_zp					;06
-.dl	inst6502_				;07
+.dl	inst6502_slo_zp 				;07
 .dl	inst6502_php					;08
 .dl	inst6502_ora_imm				;09
 .dl	inst6502_asl					;0A
@@ -3331,31 +4763,31 @@ inst6502_instruction_set:
 .dl	inst6502_nop_abs				;0C
 .dl	inst6502_ora_abs				;0D
 .dl	inst6502_asl_abs				;0E
-.dl	inst6502_				;0F
+.dl	inst6502_slo_abs				;0F
 .dl	inst6502_bpl					;10
 .dl	inst6502_ora_indy				;11
 .dl	inst6502_jam_12_halt			;12 JAM. Used to halt emulation for inspection
-.dl	inst6502_				;13
+.dl	inst6502_slo_indy				;13
 .dl	inst6502_nop_zpx				;14
 .dl	inst6502_ora_zpx				;15
 .dl	inst6502_asl_zpx				;16
-.dl	inst6502_				;17
+.dl	inst6502_slo_zpx				;17
 .dl	inst6502_clc					;18
 .dl	inst6502_ora_absy				;19
 .dl	inst6502_nop_implied    		;1A
-.dl	inst6502_				;1B
+.dl	inst6502_slo_absy				;1B
 .dl	inst6502_nop_absx				;1C
 .dl	inst6502_ora_absx				;1D
 .dl	inst6502_asl_absx				;1E
-.dl	inst6502_				;1F
+.dl	inst6502_slo_absx				;1F
 .dl	inst6502_jsr					;20
 .dl	inst6502_and_indx				;21
 .dl	inst6502_jam_22 				;22
-.dl	inst6502_				;23
+.dl	isnt6502_rla_indx				;23
 .dl	inst6502_bit_zp					;24
 .dl	inst6502_and_zp					;25
 .dl	inst6502_rol_zp					;26
-.dl	inst6502_				;27
+.dl	inst6502_rla_zp 				;27
 .dl	inst6502_plp					;28
 .dl	inst6502_and_imm				;29
 .dl	inst6502_rol					;2A
@@ -3363,31 +4795,31 @@ inst6502_instruction_set:
 .dl	inst6502_bit_abs				;2C
 .dl	inst6502_and_abs				;2D
 .dl	inst6502_rol_abs				;2E
-.dl	inst6502_				;2F
+.dl	inst6502_rla_abs				;2F
 .dl	inst6502_bmi					;30
 .dl	inst6502_and_indy				;31
 .dl	inst6502_jam_32 				;32
-.dl	inst6502_				;33
+.dl	inst6502_rla_indy				;33
 .dl	inst6502_nop_zpx				;34
 .dl	inst6502_and_zpx				;35
 .dl	inst6502_rol_zpx				;36
-.dl	inst6502_						;37
+.dl	inst6502_rla_zpx				;37
 .dl	inst6502_sec					;38
 .dl	inst6502_and_absy				;39
 .dl	inst6502_nop_implied			;3A
-.dl	inst6502_			;3B
+.dl	inst6502_rla_absy   			;3B
 .dl	inst6502_nop_absx   			;3C
 .dl	inst6502_and_absx				;3D
 .dl	inst6502_rol_absx				;3E
-.dl	inst6502_			;3F
+.dl	inst6502_rla_absx   			;3F
 .dl	inst6502_rti					;40
 .dl	inst6502_eor_indx				;41
 .dl	inst6502_jam_42     			;42
-.dl	inst6502_			;43
+.dl	isnt6502_sre_indx   			;43
 .dl	inst6502_nop_zp     			;44
 .dl	inst6502_eor_zp					;45
 .dl	inst6502_lsr_zp					;46
-.dl	inst6502_			;47
+.dl	inst6502_sre_zp     			;47
 .dl	inst6502_pha					;48
 .dl	inst6502_eor_imm				;49
 .dl	inst6502_lsr					;4A
@@ -3395,63 +4827,63 @@ inst6502_instruction_set:
 .dl	inst6052_jmp_abs				;4C
 .dl	inst6502_eor_abs				;4D
 .dl	inst6502_lsr_abs				;4E
-.dl	inst6502_			;4F
+.dl	inst6502_sre_abs    			;4F
 .dl	inst6502_bvc					;50
 .dl	inst6502_eor_indy				;51
 .dl	inst6502_jam_52     			;52
-.dl	inst6502_			;53
+.dl	inst6502_sre_indy   			;53
 .dl	inst6502_nop_zpx    			;54
 .dl	inst6502_eor_zpx				;55
 .dl	inst6502_lsr_zpx				;56
-.dl	inst6502_			;57
+.dl	inst6502_sre_zpx    			;57
 .dl	inst6502_cli					;58
 .dl	inst6502_eor_absy				;59
 .dl	inst6502_nop_implied			;5A
-.dl	inst6502_			;5B
+.dl	inst6502_sre_absy   			;5B
 .dl	inst6502_nop_absx   			;5C
 .dl	inst6502_eor_absx				;5D
 .dl	inst6502_lsr_absx				;5E
-.dl	inst6502_			;5F
+.dl	inst6502_sre_absx   			;5F
 .dl	inst6502_rts					;60
 .dl	inst6502_adc_indx				;61
 .dl	inst6502_jam_62     			;62
-.dl	inst6502_			;63
+.dl	isnt6502_rra_indx   			;63
 .dl	inst6502_nop_zp     			;64
 .dl	inst6502_adc_zp					;65
 .dl	inst6502_ror_zp					;66
-.dl	inst6502_			;67
+.dl	inst6502_rra_zp     			;67
 .dl	inst6502_pla					;68
 .dl	inst6502_adc_imm				;69
 .dl	inst6502_ror					;6A
-.dl	inst6502_			;6B
+.dl	instr6502_arr_imm   			;6B
 .dl	inst6502_jmp_indir				;6C
 .dl	inst6502_adc_abs				;6D
 .dl	inst6502_ror_abs				;6E
-.dl	inst6502_			;6F
+.dl	inst6502_rra_abs    			;6F
 .dl	inst6502_bvs					;70
 .dl	inst6502_adc_indy				;71
 .dl	inst6502_jam_72     			;72
-.dl	inst6502_			;73
+.dl	inst6502_rra_indy   			;73
 .dl	inst6502_nop_zpx    			;74
 .dl	inst6502_adc_zpx				;75
 .dl	inst6502_ror_zpx				;76
-.dl	inst6502_			;77
+.dl	inst6502_rra_zpx    			;77
 .dl	inst6502_sei					;78
 .dl	inst6502_adc_absy				;79
-.dl	inst6502_			;7A
-.dl	inst6502_			;7B
+.dl	inst6502_nop_implied			;7A
+.dl	inst6502_rra_absy   			;7B
 .dl	inst6502_nop_absx   			;7C
 .dl	inst6502_adc_absx				;7D
 .dl	inst6502_ror_absx				;7E
-.dl	inst6502_			;7F
+.dl	inst6502_rra_absx   			;7F
 .dl	inst6502_nop_imm    			;80
 .dl	inst6502_sta_indx				;81
 .dl	inst6502_nop_imm    			;82
-.dl	inst6502_			;83
+.dl	inst6502_sax_indx   			;83
 .dl	inst6502_sty_zp					;84
 .dl	inst6502_sta_zp					;85
 .dl	inst6502_stx_zp					;86
-.dl	inst6502_			;87
+.dl	inst6502_sax_zp     			;87
 .dl	inst6502_dey					;88
 .dl	inst6502_nop_imm    			;89
 .dl	inst6502_txa					;8A
@@ -3459,119 +4891,119 @@ inst6502_instruction_set:
 .dl	inst6502_sty_abs				;8C
 .dl	inst6502_sta_abs				;8D
 .dl	inst6502_stx_abs				;8E
-.dl	inst6502_			;8F
+.dl	inst6502_sax_abs    			;8F
 .dl	inst6502_bcc					;90
 .dl	inst6502_sta_indy				;91
 .dl	inst6502_jam_92     			;92
-.dl	inst6502_			;93
+.dl	inst6502_sha_indy   			;93
 .dl	inst6502_sty_zpx				;94
 .dl	inst6502_sta_zpx				;95
 .dl	inst6502_stx_zpy				;96
-.dl	inst6502_			;97
+.dl	inst6502_sax_zpy    			;97
 .dl	inst6502_tya					;98
 .dl	inst6502_sta_absy				;99
 .dl	inst6502_txs					;9A
-.dl	inst6502_			;9B
-.dl	inst6502_			;9C
+.dl	inst6502_tas_absy   			;9B
+.dl	inst6502_shy_absx   			;9C
 .dl	inst6502_sta_absx				;9D
-.dl	inst6502_			;9E
-.dl	inst6502_			;9F
+.dl	inst6502_shx_absy   			;9E
+.dl	inst6502_sha_absy   			;9F
 .dl	inst6502_ldy_imm				;A0
 .dl	inst6502_lda_indx				;A1
 .dl	inst6502_ldx_imm				;A2
-.dl	inst6502_			;A3
+.dl	inst6502_lax_indx   			;A3
 .dl	inst6502_ldy_zp					;A4
 .dl	inst6502_lda_zp					;A5
 .dl	inst6502_ldx_zp					;A6
-.dl	inst6502_			;A7
+.dl	inst6502_lax_zp     			;A7
 .dl	inst6502_tay					;A8
 .dl	inst6502_lda_imm				;A9
 .dl	inst6502_tax					;AA
-.dl	inst6502_			;AB
+.dl	inst6502_lxa        			;AB
 .dl	inst6502_ldy_abs				;AC
 .dl	inst6502_lda_abs				;AD
 .dl	inst6502_ldx_abs				;AE
-.dl	inst6502_			;AF
+.dl	inst6502_lax_abs    			;AF
 .dl	inst6502_bcs					;B0
 .dl	inst6502_lda_indy				;B1
 .dl	inst6502_jam_B2     			;B2
-.dl	inst6502_			;B3
+.dl	inst6502_lax_indy   			;B3
 .dl	inst6502_ldy_zpx				;B4
 .dl	inst6502_lda_zpx				;B5
 .dl	inst6502_ldx_zpy				;B6
-.dl	inst6502_			;B7
+.dl	inst6502_lax_zpy    			;B7
 .dl	inst6502_clv					;B8
 .dl	inst6502_lda_absy				;B9
 .dl	inst6502_tsx					;BA
-.dl	inst6502_			;BB
+.dl	inst6502_las_absy   			;BB
 .dl	inst6502_ldy_absx				;BC
 .dl	inst6502_lda_absx				;BD
 .dl	inst6502_ldx_absy				;BE
-.dl	inst6502_			;BF
+.dl	inst6502_lax_absy   			;BF
 .dl	inst6502_cpy_imm				;C0
 .dl	inst6502_cmp_indx				;C1
 .dl	inst6502_nop_imm    			;C2
-.dl	inst6502_			;C3
+.dl	inst6502_dcp_indx   			;C3
 .dl	inst6502_cpy_zp					;C4
 .dl	inst6502_cmp_zp					;C5
 .dl	inst6502_dec_zp					;C6
-.dl	inst6502_			;C7
+.dl	inst6502_dcp_zp     			;C7
 .dl	inst6502_iny					;C8
 .dl	inst6502_cmp_imm				;C9
 .dl	inst6502_dex					;CA
-.dl	inst6502_			;CB
+.dl	inst6502_sbx_imm    			;CB
 .dl	inst6502_cpy_abs				;CC
 .dl	inst6502_cmp_abs				;CD
 .dl	inst6502_dec_abs				;CE
-.dl	inst6502_			;CF
+.dl	inst6502_dcp_abs    			;CF
 .dl	inst6502_bne					;D0
 .dl	inst6502_cmp_indy				;D1
 .dl	inst6502_jam_D2     			;D2
-.dl	inst6502_			;D3
+.dl	inst6502_dcp_indy   			;D3
 .dl	inst6502_nop_zpx    			;D4
 .dl	inst6502_cmp_zpx				;D5
 .dl	inst6502_dec_zpx				;D6
-.dl	inst6502_			;D7
+.dl	inst6520_dcp_zpx    			;D7
 .dl	inst6502_cld					;D8
 .dl	inst6502_cmp_absy				;D9
 .dl	inst6502_nop_implied			;DA
-.dl	inst6502_			;DB
+.dl	inst6502_dcp_absy   			;DB
 .dl	inst6502_nop_absx   			;DC
 .dl	inst6502_cmp_absx				;DD
 .dl	inst6502_dec_absx				;DE
-.dl	inst6502_			;DF
+.dl	inst6502_dcp_absx   			;DF
 .dl	inst6502_cpx_imm				;E0
 .dl	inst6502_sbc_indx				;E1
 .dl	inst6502_nop_imm    			;E2
-.dl	inst6502_			;E3
+.dl	inst6502_isc_indx   			;E3
 .dl	inst6502_cpx_zp					;E4
 .dl	inst6502_sbc_zp					;E5
 .dl	inst6502_inc_zp					;E6
-.dl	inst6502_			;E7
+.dl	inst6502_isc_zp     			;E7
 .dl	inst6502_inx					;E8
 .dl	inst6502_sbc_imm				;E9
 .dl	inst6502_nop					;EA
-.dl	inst6502_			;EB
+.dl	inst6502_sbc_imm			    ;EB *DUPLICATE OF E9
 .dl	inst6502_cpx_abs				;EC
 .dl	inst6502_sbc_abs				;ED
 .dl	inst6502_inc_abs				;EE
-.dl	inst6502_			;EF
+.dl	inst6502_isc_abs    			;EF
 .dl	inst6502_beq					;F0
 .dl	inst6502_sbc_indy				;F1
 .dl	inst6502_jam_F2     			;F2
-.dl	inst6502_			;F3
+.dl	inst6502_isc_indy   			;F3
 .dl	inst6502_nop_zpx    			;F4
 .dl	inst6502_sbc_zpx				;F5
 .dl	inst6502_inc_zpx				;F6
-.dl	inst6502_			;F7
+.dl	inst6520_isc_zpx    			;F7
 .dl	inst6502_sed					;F8
 .dl	inst6502_sbc_absy				;F9
 .dl	inst6502_nop_implied			;FA
-.dl	inst6502_			;FB
+.dl	inst6502_isc_absy   			;FB
 .dl	inst6502_nop_absx   			;FC
 .dl	inst6502_sbc_absx				;FD
 .dl	inst6502_inc_absx				;FE
-.dl	inst6502_			;FF
+.dl	inst6502_isc_absx   			;FF
 
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
