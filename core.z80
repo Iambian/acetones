@@ -3137,18 +3137,130 @@ inst6502_nop:
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------
-;Instruction not mapped: Terminate emulation
-inst6502_:
-    ret
-
-inst6502_halt:
-    jr $
-    jp i6502FinishLoad
-
-;-----------------------------------------------------------------------------
-;-----------------------------------------------------------------------------
-;-----------------------------------------------------------------------------
 ;Instructions by type: Illegal Instructions
+
+;NOP - No operations. All the no-operations. Even the ones that are linked
+;to the machinery that operates an addressing mode, but does nothing with it.
+;A whole lotta nothing.
+
+;Bytes:1, Cycles:2, Opcodes: 1A, 3A, 5A, DA, FA
+inst6502_nop_implied:
+    ADDCYC(2)
+    jp  i6502FinishLoad
+
+;Bytes:2, Cycles:2, Opcodes: 80, 82, 89, C2, E2
+inst6502_nop_imm:
+    ADDCYC(2)
+    jp  i6502NextLoad
+
+;Bytes:2, Cycles:3, Opcodes: 04, 44, 64
+inst6502_nop_zp:
+    ADDCYC(3)
+    jp  i6502NextLoad
+
+;Bytes:2, Cycles:4, Opcodes: 14, 34, 54, 74, D4, F4
+inst6502_nop_zpx:
+    ADDCYC(4)
+    jp  i6502NextLoad
+
+;Bytes:3, Cycles:4, Opcode: 0C
+inst6502_nop_abs:
+    ADDCYC(4)
+    push hl
+        call subroutine6502_abs_split_start
+        READ_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;Note: This thing latches all over the place but does nothing. All these
+;READ_ACCESS thingies are in case the ROM wants to clear PPU flags or something
+;using these instructions. But the one below is noted to do the touchy-feelies
+;at ABS and (ABS+X)&0xFF
+;Bytes:3, Cycles:4*, Opcodes: 1C, 3C, 5C, 7C, DC, FC
+inst6502_nop_absx:
+    ADDCYC(4)
+    PUSH_ABSXSPLIT
+        READ_ACCESS
+    pop hl
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+;ALR (ASR) - AND oper + LSR
+;Affects CZN
+
+;immediate	ALR #oper	4B	2	2 
+inst6502_alr_imm:
+    ADDCYC(2)
+    ld  a,(ix+REGA)
+    and a,(hl)
+    srl a   ;Must do it this way. A-optimized instr do not affect Z
+    ld  (ix+REGA),a
+    FLAGS_CZN
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+
+;ANC [ANC (ANC2)] - AND oper + set Carry as if ASL [ROL]
+
+;immediate	ANC #oper	0B	2	2 
+;immediate	ANC #oper	2B	2	2
+instr6502_anc_imm:
+instr6502_anc2_imm:
+    ADDCYC(2)
+    ld  a,(ix+REGA)
+    and a,(hl)
+    ld  (ix+REGA),a
+    rlc a
+    ld  a,(ix+REGSR)
+    ;A small optimiztion here, letting us merge OPRFLG_C and OPRFLG_N
+    res SF_CARRY,a
+    res SF_NEG,a
+    jr  nc,+_
+    set SF_CARRY,a
+    set SF_NEG,a
+_:  res SF_ZERO,a
+    jr  nz,$+4
+    set SF_ZERO,a
+    ld  (ix+REGSR),a
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+
+;ANE (XAA) - (A OR ??) AND X AND oper -> A
+;immediate	ANE #oper	8B	2	2  	††
+instr6502_ane_imm:
+    ADDCYC(2)
+    jr  $   ;Don't even try this. Just lock it up and say good night.
+    jp  i6502NextLoad
+
+;-----------------------------------------------------------------------------
+
+
+;ARR - AND OPER + ROR
+;Something hinky is going on with the flags. "This operation involves the adder"
+;I need to get a better handle over what that might be.
+;
+;Primary sources reads:
+;----------------------
+;This operation involves the adder:
+;V-flag is set according to (A AND oper) + oper
+;The carry is not set, but bit 7 (sign) is exchanged with the carry
+;A AND oper, C -> [76543210] -> C
+;
+;Secondary source reads:
+;-----------------------
+;Similar to AND #i then ROR A, except sets the flags differently. 
+;N and Z are normal, but C is bit 6 and V is bit 6 xor bit 5. 
+;A fast way to perform signed division by 4 is: CMP #$80; ARR #$FF; ROR. 
+;This can be extended to larger powers of two.
+
+;immediate	ARR #oper	6B	2	2  
+instr6502_arr_imm:
+    ADDCYC(2)
+    jr  $
+
+
+
 
 
 ;-----------------------------------------------------------------------------
@@ -3206,39 +3318,39 @@ inst6502_halt:
 inst6502_instruction_set:
 .dl	inst6502_brk					;00
 .dl	inst6502_ora_indx				;01
-.dl	inst6502_				;02
+.dl	inst6502_jam_02 				;02
 .dl	inst6502_				;03
-.dl	inst6502_				;04
+.dl	inst6502_nop_zp 				;04
 .dl	inst6502_ora_zp					;05
 .dl	inst6502_asl_zp					;06
 .dl	inst6502_				;07
 .dl	inst6502_php					;08
 .dl	inst6502_ora_imm				;09
 .dl	inst6502_asl					;0A
-.dl	inst6502_				;0B
-.dl	inst6502_				;0C
+.dl	instr6502_anc_imm				;0B
+.dl	inst6502_nop_abs				;0C
 .dl	inst6502_ora_abs				;0D
 .dl	inst6502_asl_abs				;0E
 .dl	inst6502_				;0F
 .dl	inst6502_bpl					;10
 .dl	inst6502_ora_indy				;11
-.dl	inst6502_halt				;12 JAM. Used to halt emulation for inspection
+.dl	inst6502_jam_12_halt			;12 JAM. Used to halt emulation for inspection
 .dl	inst6502_				;13
-.dl	inst6502_				;14
+.dl	inst6502_nop_zpx				;14
 .dl	inst6502_ora_zpx				;15
 .dl	inst6502_asl_zpx				;16
 .dl	inst6502_				;17
 .dl	inst6502_clc					;18
 .dl	inst6502_ora_absy				;19
-.dl	inst6502_				;1A
+.dl	inst6502_nop_implied    		;1A
 .dl	inst6502_				;1B
-.dl	inst6502_				;1C
+.dl	inst6502_nop_absx				;1C
 .dl	inst6502_ora_absx				;1D
 .dl	inst6502_asl_absx				;1E
 .dl	inst6502_				;1F
 .dl	inst6502_jsr					;20
 .dl	inst6502_and_indx				;21
-.dl	inst6502_				;22
+.dl	inst6502_jam_22 				;22
 .dl	inst6502_				;23
 .dl	inst6502_bit_zp					;24
 .dl	inst6502_and_zp					;25
@@ -3247,64 +3359,64 @@ inst6502_instruction_set:
 .dl	inst6502_plp					;28
 .dl	inst6502_and_imm				;29
 .dl	inst6502_rol					;2A
-.dl	inst6502_				;2B
+.dl	instr6502_anc2_imm				;2B
 .dl	inst6502_bit_abs				;2C
 .dl	inst6502_and_abs				;2D
 .dl	inst6502_rol_abs				;2E
 .dl	inst6502_				;2F
 .dl	inst6502_bmi					;30
 .dl	inst6502_and_indy				;31
-.dl	inst6502_				;32
+.dl	inst6502_jam_32 				;32
 .dl	inst6502_				;33
-.dl	inst6502_				;34
+.dl	inst6502_nop_zpx				;34
 .dl	inst6502_and_zpx				;35
 .dl	inst6502_rol_zpx				;36
 .dl	inst6502_						;37
 .dl	inst6502_sec					;38
 .dl	inst6502_and_absy				;39
-.dl	inst6502_			;3A
+.dl	inst6502_nop_implied			;3A
 .dl	inst6502_			;3B
-.dl	inst6502_			;3C
+.dl	inst6502_nop_absx   			;3C
 .dl	inst6502_and_absx				;3D
 .dl	inst6502_rol_absx				;3E
 .dl	inst6502_			;3F
 .dl	inst6502_rti					;40
 .dl	inst6502_eor_indx				;41
-.dl	inst6502_			;42
+.dl	inst6502_jam_42     			;42
 .dl	inst6502_			;43
-.dl	inst6502_			;44
+.dl	inst6502_nop_zp     			;44
 .dl	inst6502_eor_zp					;45
 .dl	inst6502_lsr_zp					;46
 .dl	inst6502_			;47
 .dl	inst6502_pha					;48
 .dl	inst6502_eor_imm				;49
 .dl	inst6502_lsr					;4A
-.dl	inst6502_			;4B
+.dl	inst6502_alr_imm    			;4B
 .dl	inst6052_jmp_abs				;4C
 .dl	inst6502_eor_abs				;4D
 .dl	inst6502_lsr_abs				;4E
 .dl	inst6502_			;4F
 .dl	inst6502_bvc					;50
 .dl	inst6502_eor_indy				;51
-.dl	inst6502_			;52
+.dl	inst6502_jam_52     			;52
 .dl	inst6502_			;53
-.dl	inst6502_			;54
+.dl	inst6502_nop_zpx    			;54
 .dl	inst6502_eor_zpx				;55
 .dl	inst6502_lsr_zpx				;56
 .dl	inst6502_			;57
 .dl	inst6502_cli					;58
 .dl	inst6502_eor_absy				;59
-.dl	inst6502_			;5A
+.dl	inst6502_nop_implied			;5A
 .dl	inst6502_			;5B
-.dl	inst6502_			;5C
+.dl	inst6502_nop_absx   			;5C
 .dl	inst6502_eor_absx				;5D
 .dl	inst6502_lsr_absx				;5E
 .dl	inst6502_			;5F
 .dl	inst6502_rts					;60
 .dl	inst6502_adc_indx				;61
-.dl	inst6502_			;62
+.dl	inst6502_jam_62     			;62
 .dl	inst6502_			;63
-.dl	inst6502_			;64
+.dl	inst6502_nop_zp     			;64
 .dl	inst6502_adc_zp					;65
 .dl	inst6502_ror_zp					;66
 .dl	inst6502_			;67
@@ -3318,9 +3430,9 @@ inst6502_instruction_set:
 .dl	inst6502_			;6F
 .dl	inst6502_bvs					;70
 .dl	inst6502_adc_indy				;71
-.dl	inst6502_			;72
+.dl	inst6502_jam_72     			;72
 .dl	inst6502_			;73
-.dl	inst6502_			;74
+.dl	inst6502_nop_zpx    			;74
 .dl	inst6502_adc_zpx				;75
 .dl	inst6502_ror_zpx				;76
 .dl	inst6502_			;77
@@ -3328,29 +3440,29 @@ inst6502_instruction_set:
 .dl	inst6502_adc_absy				;79
 .dl	inst6502_			;7A
 .dl	inst6502_			;7B
-.dl	inst6502_			;7C
+.dl	inst6502_nop_absx   			;7C
 .dl	inst6502_adc_absx				;7D
 .dl	inst6502_ror_absx				;7E
 .dl	inst6502_			;7F
-.dl	inst6502_			;80
+.dl	inst6502_nop_imm    			;80
 .dl	inst6502_sta_indx				;81
-.dl	inst6502_			;82
+.dl	inst6502_nop_imm    			;82
 .dl	inst6502_			;83
 .dl	inst6502_sty_zp					;84
 .dl	inst6502_sta_zp					;85
 .dl	inst6502_stx_zp					;86
 .dl	inst6502_			;87
 .dl	inst6502_dey					;88
-.dl	inst6502_			;89
+.dl	inst6502_nop_imm    			;89
 .dl	inst6502_txa					;8A
-.dl	inst6502_			;8B
+.dl	instr6502_ane_imm   			;8B
 .dl	inst6502_sty_abs				;8C
 .dl	inst6502_sta_abs				;8D
 .dl	inst6502_stx_abs				;8E
 .dl	inst6502_			;8F
 .dl	inst6502_bcc					;90
 .dl	inst6502_sta_indy				;91
-.dl	inst6502_			;92
+.dl	inst6502_jam_92     			;92
 .dl	inst6502_			;93
 .dl	inst6502_sty_zpx				;94
 .dl	inst6502_sta_zpx				;95
@@ -3382,7 +3494,7 @@ inst6502_instruction_set:
 .dl	inst6502_			;AF
 .dl	inst6502_bcs					;B0
 .dl	inst6502_lda_indy				;B1
-.dl	inst6502_			;B2
+.dl	inst6502_jam_B2     			;B2
 .dl	inst6502_			;B3
 .dl	inst6502_ldy_zpx				;B4
 .dl	inst6502_lda_zpx				;B5
@@ -3398,7 +3510,7 @@ inst6502_instruction_set:
 .dl	inst6502_			;BF
 .dl	inst6502_cpy_imm				;C0
 .dl	inst6502_cmp_indx				;C1
-.dl	inst6502_			;C2
+.dl	inst6502_nop_imm    			;C2
 .dl	inst6502_			;C3
 .dl	inst6502_cpy_zp					;C4
 .dl	inst6502_cmp_zp					;C5
@@ -3414,23 +3526,23 @@ inst6502_instruction_set:
 .dl	inst6502_			;CF
 .dl	inst6502_bne					;D0
 .dl	inst6502_cmp_indy				;D1
-.dl	inst6502_			;D2
+.dl	inst6502_jam_D2     			;D2
 .dl	inst6502_			;D3
-.dl	inst6502_			;D4
+.dl	inst6502_nop_zpx    			;D4
 .dl	inst6502_cmp_zpx				;D5
 .dl	inst6502_dec_zpx				;D6
 .dl	inst6502_			;D7
 .dl	inst6502_cld					;D8
 .dl	inst6502_cmp_absy				;D9
-.dl	inst6502_			;DA
+.dl	inst6502_nop_implied			;DA
 .dl	inst6502_			;DB
-.dl	inst6502_			;DC
+.dl	inst6502_nop_absx   			;DC
 .dl	inst6502_cmp_absx				;DD
 .dl	inst6502_dec_absx				;DE
 .dl	inst6502_			;DF
 .dl	inst6502_cpx_imm				;E0
 .dl	inst6502_sbc_indx				;E1
-.dl	inst6502_			;E2
+.dl	inst6502_nop_imm    			;E2
 .dl	inst6502_			;E3
 .dl	inst6502_cpx_zp					;E4
 .dl	inst6502_sbc_zp					;E5
@@ -3446,20 +3558,52 @@ inst6502_instruction_set:
 .dl	inst6502_			;EF
 .dl	inst6502_beq					;F0
 .dl	inst6502_sbc_indy				;F1
-.dl	inst6502_			;F2
+.dl	inst6502_jam_F2     			;F2
 .dl	inst6502_			;F3
-.dl	inst6502_			;F4
+.dl	inst6502_nop_zpx    			;F4
 .dl	inst6502_sbc_zpx				;F5
 .dl	inst6502_inc_zpx				;F6
 .dl	inst6502_			;F7
 .dl	inst6502_sed					;F8
 .dl	inst6502_sbc_absy				;F9
-.dl	inst6502_			;FA
+.dl	inst6502_nop_implied			;FA
 .dl	inst6502_			;FB
-.dl	inst6502_			;FC
+.dl	inst6502_nop_absx   			;FC
 .dl	inst6502_sbc_absx				;FD
 .dl	inst6502_inc_absx				;FE
 .dl	inst6502_			;FF
+
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;-----------------------------------------------------------------------------
+;These instructions are located here because they perform a function outside
+;the context of emulating instructions. These are mapped to instructions that
+;would, on the real hardware, freeze the CPU and require a reset to continue.
+;
+;Here, they'll let us perform useful things. Like exiting the emulator.
+;Or jamming in one spot. Or other things in the future. Debugging things.
+;Future stuff like breakpoints and console output. That sorta thing.
+;
+
+inst6502_:
+    ret
+
+inst6502_jam_12_halt:
+    jr $
+    jp i6502FinishLoad
+
+inst6502_jam_02:
+inst6502_jam_22:
+inst6502_jam_32:
+inst6502_jam_42:
+inst6502_jam_52:
+inst6502_jam_62:
+inst6502_jam_72:
+inst6502_jam_92:
+inst6502_jam_B2:
+inst6502_jam_D2:
+inst6502_jam_F2:
+    ret
 
 
 
