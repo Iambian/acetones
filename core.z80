@@ -53,19 +53,26 @@ i6502Init:
     ld  bc,$002001
     ld  e,$20
     call i6502_map_pages
+    call i6502_load_instruction_set
+    ;
+    ld  ix,core_memory_ix
     ld  iy,2    ;8 cycle startup. Hooking into inst6502_jsr for init
     lea hl,ix-128
     lea de,ix-127
     ld  bc,255
     ld  (hl),$00
     ldir
-    call i6502_load_instruction_set
+    ;
+    ld  hl,0
+    add hl,sp
+    ld  (ix+CORE_STACK_BASE),hl
+
     ;Note: SP may need initialization. So does SR for interrupts. Or somesuch.
     ld  hl,PAGETABLE+(255*BASETABLE_STRIDE)
     ld  hl,(hl)
     ld  de,$0000FC
     add hl,de
-    ld  ix,core_memory_ix
+    ;
     ;jp inst6502_jsr
     ;Manual loading below. Uncomment "jp inst6502_jsr" to return to original.
     ;Settings below is to run nestest CPU-only test. The reset vector above
@@ -148,7 +155,13 @@ _:                  ld  a,(hl)
                     push iy
                         call dbg_printLine
                     pop iy
-                    ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
+                    ld  a,(ix+CORE_ERROR_LEVEL)
+                    or  a,a
+                    jr  z,+_
+                    ld  hl,(ix+CORE_STACK_BASE)
+                    ld  sp,hl
+                    ret
+_:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
                     lea hl,iy+0
                     ld  de,DEBUG_STEP_START_CYCLE
                     or  a,a
@@ -3167,8 +3180,8 @@ inst6502_nop_zpx:
 ;Bytes:3, Cycles:4, Opcode: 0C
 inst6502_nop_abs:
     ADDCYC(4)
+    call subroutine6502_abs_split_start
     push hl
-        call subroutine6502_abs_split_start
         READ_ACCESS
     pop hl
     jp  i6502NextLoad
@@ -3974,6 +3987,9 @@ inst6502_rra_zp:
     ld  a,(bc)
     rra
     ld  (bc),a
+    res SF_CARRY,(ix+REGSR)
+    jr nc,$+6
+    set SF_CARRY,(ix+REGSR)
     ld  c,a
     jp  subroutine6502_adc_combined_end
 
@@ -3990,6 +4006,9 @@ inst6502_rra_zpx:
     ld  a,(bc)
     rra
     ld  (bc),a
+    res SF_CARRY,(ix+REGSR)
+    jr nc,$+6
+    set SF_CARRY,(ix+REGSR)
     ld  c,a
     jp  subroutine6502_adc_combined_end
 
@@ -4012,6 +4031,9 @@ inst6502_rra_abs:
         ld  b,(ix+REGSR)
         rr b
         rra
+        res SF_CARRY,(ix+REGSR)
+        jr nc,$+6
+        set SF_CARRY,(ix+REGSR)
         ld  b,a
         push bc
             WRITE_ACCESS
@@ -4028,6 +4050,9 @@ inst6502_rra_absx:
         ld  b,(ix+REGSR)
         rr b
         rra
+        res SF_CARRY,(ix+REGSR)
+        jr nc,$+6
+        set SF_CARRY,(ix+REGSR)
         ld  b,a
         push bc
             WRITE_ACCESS
@@ -4044,6 +4069,9 @@ inst6502_rra_absy:
         ld  b,(ix+REGSR)
         rr b
         rra
+        res SF_CARRY,(ix+REGSR)
+        jr nc,$+6
+        set SF_CARRY,(ix+REGSR)
         ld  b,a
         push bc
             WRITE_ACCESS
@@ -4077,6 +4105,9 @@ isnt6502_rra_indx:
         ld  b,(ix+REGSR)
         rr b
         rra
+        res SF_CARRY,(ix+REGSR)
+        jr nc,$+6
+        set SF_CARRY,(ix+REGSR)
         ld  b,a
         push bc
             WRITE_ACCESS
@@ -4112,6 +4143,9 @@ _:      ld  d,h         ;save MSB of read address for access controls
         ld  b,(ix+REGSR)
         rr b
         rra
+        res SF_CARRY,(ix+REGSR)
+        jr nc,$+6
+        set SF_CARRY,(ix+REGSR)
         ld  b,a
         push bc
             WRITE_ACCESS
@@ -4135,7 +4169,8 @@ inst6502_sax_zp:
     ld  a,(ix+REGA)
     and a,(ix+REGX)
     ld  (bc),a
-    ret
+    jp i6502NextLoad
+
 
 ;zeropage,Y	SAX oper,Y	97	2	4  	
 inst6502_sax_zpy:
@@ -4148,7 +4183,8 @@ inst6502_sax_zpy:
     ld  a,(ix+REGA)
     and a,(ix+REGX)
     ld  (bc),a
-    ret
+    jp i6502NextLoad
+
 
 ;absolute	SAX oper	8F	3	4  	
 inst6502_sax_abs:
@@ -4196,6 +4232,7 @@ inst6502_sax_indx:
         ld  a,(ix+REGA)
         and a,(ix+REGX)
         ld  b,a
+        WRITE_ACCESS
     pop hl
     jp i6502NextLoad
 
@@ -4482,7 +4519,7 @@ _:      ld  d,h         ;save MSB of read address for access controls
         ;Split oper
         ld  b,(ix+REGSR)
         OPRFLG_C
-        and a,(ix+REGA)
+        or  a,(ix+REGA)
         ld  (ix+REGA),a
         OPRFLG_Z
         add a,a

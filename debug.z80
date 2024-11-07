@@ -168,7 +168,7 @@ _:      pop bc
     ;
     ;Remove section below when done testing nestest for timings
     ;
-
+dbg_printLine_noPrint:
     ld  de,0
     ld  hl,(timings_base)
     ld  e,(hl)
@@ -185,7 +185,21 @@ _:      pop bc
     call newLine
     ld  hl,dbg_printLine_timeMismatch
     call printString
-_:  ;
+    ld  (ix+CORE_ERROR_LEVEL),1
+_:  ld  hl,(timings_base)
+    ld  a,(hl)
+    inc hl
+    ld  (timings_base),hl
+    cp  a,(ix+REGSR)
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_statusRegisterMismatch
+    call printString
+    ld  (ix+CORE_ERROR_LEVEL),2
+_:
+    ;
     ;End debug-debug section
     ;
     call fastCopy
@@ -197,7 +211,7 @@ _:  ;
     ;push hl \ push bc \ push de \ push ix \ push iy \ push af
     ret
 
-dbg_printLine_noPrint:
+
     ;also remove this when done timing debugging
     ld  de,0
     ld  hl,(timings_base)
@@ -229,6 +243,9 @@ dbg_printLine_str001:
 .db "AXYSP ",0
 dbg_printLine_timeMismatch:
 .db "CPU Test timing mismatch.",0
+dbg_printLine_statusRegisterMismatch:
+;    0123456789012345678901234567890123456789
+.db "CPU Test status register mismatch.",0
 
 
 
