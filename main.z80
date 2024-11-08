@@ -21,8 +21,10 @@
 
 programStart:
     di
+    ;Continuous. Else it'd be possible for an NES ROM to tank the CPU
+    ;performance by constantly polling the keyboard.
     ld  hl,mpKeyMode
-    ld  (hl),3          ;An assumption is being made on keypad's starting state
+    ld  (hl),3      
     ld  (save_spl),sp
     ld  a,MB
     ld  (save_mbase),a
@@ -149,6 +151,7 @@ _:  ld  e,(hl)
     ld  (ix+3),a
 
     call i6502Init
+
 
     ld  ix,$F20000
     ld  a,(ix+$30)
@@ -571,7 +574,7 @@ mapper0_apu_read:
     jr  nz,+_
     xor a,a
     srl (ix+APU_KEYPAD)
-    add a,a                 ;TODO: Open bus behavior on bits 5-7
+    adc a,a                 ;TODO: Open bus behavior on bits 5-7
     ret
 _:  ld  a,(hl)  ;hope that the dummy map page is good enough to not crash.
     ret
@@ -608,14 +611,11 @@ mapper0_apu_write:
     ld  hl,mpKeyMode
     jr  z,mapper0_apu_stop_keyboard
     ld  a,(hl)
-    or  a,a
-    ret nz      ;don't stop a busy keyboard.
-    ld  (hl),2  ;start single-run go at it and that's it.
+    cp  a,3
+    ret z       ;don't do anything to the keyboard if running continuous.
+    ld  (hl),a  ;else set to continuous and keep going.
     ret
 mapper0_apu_stop_keyboard:
-    ld  a,(hl)
-    or  a,a
-    jr  nz,mapper0_apu_stop_keyboard
     ld  L,$12   ;76543210 : del mode 2nd y= wind zoom trace graph
     ld  a,(hl)
     ld  L,$1E   ;----3210 : up right left down
