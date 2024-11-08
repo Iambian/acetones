@@ -6,8 +6,11 @@
 ;
 ;
 
-DEBUG_PRINT_START_CYCLE .equ 26485
-DEBUG_STEP_START_CYCLE  .equ 26485
+;Undefine this to speed up core process by losing debug state
+;#define COREDEBUG
+
+DEBUG_PRINT_START_CYCLE .equ 0
+DEBUG_STEP_START_CYCLE  .equ 30000 ;26485
 
 
 
@@ -32,11 +35,13 @@ ZEROPAGE            .equ main_ram+(0*256)
 STACKBASE           .equ main_ram+(1*256)
 
 BASETABLE           .equ $D04000        ;variable size. 256*BASETABLE_STRIDE
-BASETABLE_STRIDE    .equ 8
+BASETABLE_STRIDE    .equ 12
 PAGETABLE_OFFSET    .equ 0
 PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
 JUMPTABLE_OFFSET    .equ 4
 JUMPTABLE           .equ BASETABLE+JUMPTABLE_OFFSET
+USETABLE_OFFSET     .equ 8
+USETABLE            .equ BASETABLE+USETABLE_OFFSET
 
 NAMETABLE1          .equ BASETABLE+(512*BASETABLE_STRIDE)
 NAMETABLE2          .equ NAMETABLE1 + 1024
@@ -78,9 +83,10 @@ FILE_SIG_ADR_OFFSET .equ 5
 ;
 ;
 
-;Undefine this to speed up core process by losing debug state
-#define COREDEBUG
 
+
+#define APU_KEYLATCH -1
+#define APU_KEYPAD -2   ;First to last: A,B,SE,ST,UP,DO,LE,RI. 01234567.
 ;core memory
 #define REGA 0
 #define REGX 1

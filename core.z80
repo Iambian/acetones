@@ -11,8 +11,8 @@
 ;NOTE: WRITE ACCESSES RELY ON KNOWING WHAT DATA TO WRITE. CAN'T STORE THAT IN A
 ;      SINCE WE NEED TO DO CONDITIONING. REGISTER B IS UNUSED SO LET'S USE THAT.
 ;
-#define READ_ACCESS ld a,(hl)
-#define WRITE_ACCESS ld (hl),b
+#define READ_ACCESS call mapper0_read
+#define WRITE_ACCESS call mapper0_write
 ;Later, put in actual test. Z if not triggered, NZ if triggered. This
 ;alters the behavior of the BRK instruction.
 #define WAS_NMI_TRIGGERED or  a
@@ -82,6 +82,10 @@ i6502Init:
     ld  (ix+REGPC),HL
     ld  iy,7
     ld  (ix+REGSP),$FD
+    ;debug stuff
+    ld  a,($F20030)
+    set 0,a ;turn on timer 1
+    ld  ($F20030),a
 
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
@@ -110,6 +114,7 @@ i6502NextLoad:
     ld  e,0         ;PCL known to be zero at this point.
 i6502FinishLoad:
     ld  a,(hl)
+
 #ifdef COREDEBUG
     ld  (ix+CURRENT_OPCODES+0),a
     ld  (ix+REGPC+0),e
@@ -173,6 +178,12 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
     pop af
 #endif
     push hl
+        lea hl,iy
+        ld  bc,-26548
+        add hl,bc
+        jr nc,+_
+    pop hl \ ret
+_:
         ld  h,a
         ld  l,BASETABLE_STRIDE
         mlt hl
@@ -193,196 +204,6 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
 ;   JP i6502FinishLoad
 ;Remember that register E is very important; it tells you about page boundaries.
 
-
-;-----------------------------------------------------------------------------    
-;-----------------------------------------------------------------------------    
-
-;    ***   *   *  *****  *      *****  **  *  ***** 
-;   *   *  *   *    *    *        *    **  *  *     
-;   *   *  *   *    *    *        *    * * *  ***   
-;   *   *  *   *    *    *        *    *  **  *     
-;    ***    ***     *    *****  *****  *  **  ***** 
-
-;-----------------------------------------------------------------------------    
-;-----------------------------------------------------------------------------    
-outline6502_imm:
-    ld  a,(hl)  ;oper uses A
-    ;oper
-    FLAGS_ZN
-    ADDCYC(2)
-    jp i6502NextLoad
-
-outline6502_abs:
-    ld  c,(hl)
-    inc hl
-    inc e
-    jr nz,+_
-    ld  d,(ix+REGPC+1)
-    inc d
-    ld.s (ix+REGPC),de
-    ld  e,BASETABLE_STRIDE
-    mlt de
-    ld  hl,PAGETABLE
-    add hl,de
-    ld  hl,(hl) ;
-    ld  e,0
-_:  ld  b,(hl)
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        ld  c,a
-        add hl,bc   ;full address
-        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
-        ld  a,(hl)  ;oper uses A
-        ;oper
-    FLAGS_ZN
-    ADDCYC(3)
-    pop hl
-    jp i6502NextLoad
-
-outline6502_zeropage:
-    ld  a,(hl)
-    ld  bc,ZEROPAGE
-    add a,c
-    ld  c,a
-    ld  a,(bc)      ;oper uses A
-    ;HARDWARE ACCESS PAGING NOT ALLOWED. NO HARDWARE INTERACTS WITH PAGE ZERO.
-    ;oper
-    FLAGS_ZN
-    ADDCYC(3)
-    jp i6502NextLoad
-
-
-;Note: has same split start as abs
-outline6502_abs_idx_x:  ;INDEXED WITH X. INDEX WITH Y VARIATION EXISTS. CAREFUL.
-    ld  c,(hl)
-    inc hl
-    inc e
-    jr nz,+_
-    ld  d,(ix+REGPC+1)
-    inc d
-    ld.s (ix+REGPC),de
-    ld  e,BASETABLE_STRIDE
-    mlt de
-    ld  hl,PAGETABLE
-    add hl,de
-    ld  hl,(hl) ;
-    ld  e,0
-_:  ld  b,(hl)
-    push hl
-        ld  d,b
-        ld  a,c
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        ld  c,a
-        ld  a,(ix+REGX)        ;REPLACE WITH REGY WHEN INSTRUCTION CALLS FOR IT
-        add a,c
-        jr  nc,+_
-        inc b
-        inc d
-        ADDCYC(1)
-_:      ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
-        add hl,bc   ;full address
-        ld  a,(hl)  ;oper uses A
-        ;oper
-    FLAGS_ZN
-    ADDCYC(4)
-    pop hl
-    jp i6502NextLoad
-
-
-outline6502_zpx:
-    ld  a,(hl)
-    ld  bc,ZEROPAGE
-    add a,c
-    add a,(ix+REGX)
-    ld  c,a
-    ld  a,(bc)      ;oper uses A
-    ;HARDWARE PAGING NOT ALLOWED. HARDWARE DOES NOT INTERACT WITH PAGE ZERO
-    ;oper
-    FLAGS_ZN
-    ADDCYC(4)
-    jp i6502NextLoad
-    
-outline6502_zpy:
-    ld  a,(hl)
-    ld  bc,ZEROPAGE
-    add a,c
-    add a,(ix+REGY)
-    ld  c,a
-    ld  a,(bc)      ;oper uses A
-    ;HARDWARE PAGING NOT ALLOWED. HARDWARE DOES NOT INTERACT WITH PAGE ZERO
-    ;oper
-    FLAGS_ZN
-    ADDCYC(4)
-    jp i6502NextLoad
-
-outline6502_preidx_indir:
-    push hl
-        ld  a,(hl)
-        ld  hl,ZEROPAGE
-        add a,L
-        add a,(ix+REGX)
-        ld  L,a
-        ld  a,(hl)
-        inc L
-        ld  d,(hl)
-        ld  b,d
-        ld  c,BASETABLE_STRIDE
-        mlt bc
-        ld  hl,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)
-        ld  b,0
-        ld  c,a
-        add hl,bc
-        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
-        ld  a,(hl)  ;oper uses A.
-        ;oper
-        FLAGS_ZN
-        ADDCYC(6)
-    pop hl
-    jp i6502NextLoad
-
-outline6502_postidx_indir:
-    push hl
-        ld  a,(hl)
-        ld  hl,ZEROPAGE
-        add a,L
-        ld  L,a
-        ld  a,(hl)      ;LSB. Keep in A for now.
-        inc L
-        add a,(ix+REGY)    ;Adjust LSB for post-idx
-        ld  h,(hl)      ;Retrieve MSB.
-        jr  nc,+_       ;Skip MSB/CC adjust if addition did not carry.
-        ADDCYC(1)
-        inc h
-_:      ld  d,h         ;save MSB of read address for access controls
-        ld  L,BASETABLE_STRIDE
-        mlt hl          ;23.
-        ld  bc,PAGETABLE
-        add hl,bc
-        ld  hl,(hl)     ;address get.
-        ld  bc,0
-        ld  c,a
-        add hl,bc       ;Full address get.
-        ld  a,(hl)
-        ;INSERT HARDWARE ACCESS PAGING. REGISTER D CONTAINS ACCESS PAGE
-        ;oper
-        FLAGS_ZN
-        ADDCYC(5)
-    pop hl
-    jp i6502NextLoad
 
 ;-----------------------------------------------------------------------------
 ;-----------------------------------------------------------------------------

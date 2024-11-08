@@ -21,6 +21,8 @@
 
 programStart:
     di
+    ld  hl,mpKeyMode
+    ld  (hl),3          ;An assumption is being made on keypad's starting state
     ld  (save_spl),sp
     ld  a,MB
     ld  (save_mbase),a
@@ -133,13 +135,29 @@ _:  ld  e,(hl)
 #ifdef COREDEBUG
     call dbg_resetScreen
 #endif
+    ld  ix,$F20000
+    ld  hl,(ix+$30)
+    res 0,L ;turn off timer 0
+    res 1,L ;timer 0 uses CPU clock
+    res 2,L ;disables timer 0 interrupt generator
+    set 1,H ;timer 0 counts upward
+    ld  (ix+$30),hl
+    
+    xor a,a
+    sbc hl,hl
+    ld  (ix+0),hl
+    ld  (ix+3),a
+
     call i6502Init
 
-;    call clearTextBuf
-;    ld  hl,helloWorld
-;    ld  de,NAMETABLE1+(32*1)+1
-;    ld  bc,13
-;    ldir
+    ld  ix,$F20000
+    ld  a,(ix+$30)
+    res 0,a ;turn off timer 0
+    set 1,a ;timer 0 uses 32768Hz clock
+    res 2,a ;disables timer 0 interrupt generator
+    ld  (ix+$30),a
+    ;
+    ld  hl,($F20000)
 
 endCurrentRun:
     call dbg_prepNextLine
@@ -194,50 +212,6 @@ testCode:
 helloWorld:
 .db "Hello, World!",0
 
-;Copied from my Falldown2 project. I didn't want to have to
-;find yet another hardware reference for something I already did.
-;But I'll have to do it again anyway because this isn't exactly
-;what we're looking for. Here, we output the same sort of
-;game keys that I've used basically all my programming life.
-;Anyhoo. We'll be using the following:
-;kbitDown	equ 00h
-;kbitLeft	equ 01h
-;kbitRight	equ 02h
-;kbitUp		equ 03h
-;kbitYequ equ 04h
-;kbit2nd		equ 05h
-;kbitMode	equ 06h
-;kbitDel		equ 07h
-;You can find the other defines approximately where I found the stuff above.
-
-getkbd_adl:
-	ld  ix,mpKeyMode
-	lea hl,ix+0
-	ld  (hl),keyModeScanOnce
-	xor a
-_:  cp  (hl)
-	jr  nz,-_
-	ld  a,(ix+kbdG1-mpKeyRange)
-	ld  l,(ix+kbdG7-mpKeyRange)
-	xor L
-	and 11110000b	;mask out lower bits to let me shove dpad bits in
-	xor L
-	ret
-
-
-waituntilkeyrelease:
-    call getkbd_adl
-    or  a,a
-    jr  nz,waituntilkeyrelease
-	ret
-
-waituntilnewkeypress:
-    call waituntilkeyrelease
-_:  call getkbd_adl
-	or  a,a
-	jr  z,-_
-    ret
-
 timings_file:
 .db AppVarObj,"timings",0
 
@@ -250,6 +224,7 @@ text004:
 text005:
 ;    0123456789012345678901234567890123456789
 .db "CPU Execution Halted                  ",0
+text006:
 
 
 .db 7
@@ -576,11 +551,111 @@ _:  call i6502_map_pages
 
 
 mapper0_read:
+    ld  a,d
+    add a,a
+    jr  nc,+_
+    ld  a,(hl)  ;is $8000 or above
+    ret
+    cp  a,$20*2
+    jr  c,+_
+    ld  a,(hl)  ;is below $2000
+    ret
+_:  add a,a
+    jr  nc,mapper0_ppu_read     ;wasn't $4000 or higher.
+    jr  z,mapper0_apu_read      ;high byte was exactly $40
     ld  a,(hl)
     ret
+mapper0_apu_read:
+    ld  a,e
+    cp  a,$16
+    jr  nz,+_
+    xor a,a
+    srl (ix+APU_KEYPAD)
+    add a,a                 ;TODO: Open bus behavior on bits 5-7
+    ret
+_:  ld  a,(hl)  ;hope that the dummy map page is good enough to not crash.
+    ret
+mapper0_ppu_read:
+    ;TODO: PPU SUPPORT
+    ld  a,(hl)
+    ret
+
+
+
 mapper0_write:
+    ld  a,d
+    cp  a,$20
+    jr  nc,+_
     ld  (hl),b
     ret
+_:  cp  a,$40
+    jr  c,mapper0_ppu_write
+    jr  z,mapper0_apu_write
+    add a,a
+    ret c       ;don't write anything to above $8000
+    ld  (hl),b  ;but allow it in $4100-$7FFF because it might be RAM.
+    ret
+mapper0_apu_write:
+    ld  a,e
+    cp  a,$16
+    jr  nz,+_
+    ld  a,(ix+APU_KEYLATCH)
+    xor a,b     ;Bit 0 is set if we're trying to change controller poll state.
+    rrca        ;And this is how we're going to get it.
+    ret nc      ;Only support NES standard controller.
+    bit 0,b     ;So... what are we changing it to?
+    ld  (ix+APU_KEYLATCH),b
+    ld  hl,mpKeyMode
+    jr  z,mapper0_apu_stop_keyboard
+    ld  a,(hl)
+    or  a,a
+    ret nz      ;don't stop a busy keyboard.
+    ld  (hl),2  ;start single-run go at it and that's it.
+    ret
+mapper0_apu_stop_keyboard:
+    ld  a,(hl)
+    or  a,a
+    jr  nz,mapper0_apu_stop_keyboard
+    ld  L,$12   ;76543210 : del mode 2nd y= wind zoom trace graph
+    ld  a,(hl)
+    ld  L,$1E   ;----3210 : up right left down
+    ld  c,(hl)
+    xor a,c
+    and a,%11110000
+    xor a,c     ;keymapping has changed. We need to further alter it.
+    ;[DE MO 2N Y= UP RI LE DO] maps to [SE, B, A, ST, UP, RI, LE, DO]
+    ;The above must be rearranged to become:
+    ;            [RI, LE, DO, UP, ST, SE, B , A ]
+    ;as compared to
+    ;            [SE, B , A , ST, UP, RI, LE, DO]
+    rlca        ;[B , A , ST, UP, RI, LE, DO, SE]
+    ld  c,a     ;b4  : UP is in correct position.
+    rlca        ;[A , ST, UP, RI, LE, DO, SE, B ]
+    rlca        ;[ST, UP, RI, LE, DO, SE, B , A ]
+    ld  b,a     ;b0-2:SE, B , and A are in the correct position
+    rlca        ;[UP, RI, LE, DO, SE, B , A , ST]
+    rlca        ;[RI, LE, DO, SE, B , A , ST, UP]
+    ld  d,a     ;b5-7: RI LE DO in correct position.
+    rlca        ;[LE, DO, SE, B , A , ST, UP, RI]
+    rlca        ;b3: ST is in the correct position.
+    xor a,c     ;
+    and a,%00001000 ;keep A3, merge others
+    xor a,c     ;Has: A3. Merge-in contains b4
+    xor a,b     ;
+    and a,%00011000 ;keep A3-4
+    xor a,b     ;Merge-in contains b0-2
+    xor a,d     ;
+    and a,%00011111 ;keep A0-4
+    xor a,d     ;Merge-in contains b5-7. Is complete.
+    ld  (ix+APU_KEYPAD),a
+    ret
+_:  ;not even going to try to emulate the second controller.
+    ld  (hl),b
+    ret
+mapper0_ppu_write:
+    ld  (hl),b
+    ret
+
 
 
 
@@ -660,7 +735,48 @@ vatTraverse_skip:
     add ix,de   ;because "sbc ix,de" isn't a thing. Boo.
     jr  vatTraverse_loop
 
+;Copied from my Falldown2 project. I didn't want to have to
+;find yet another hardware reference for something I already did.
+;But I'll have to do it again anyway because this isn't exactly
+;what we're looking for. Here, we output the same sort of
+;game keys that I've used basically all my programming life.
+;Anyhoo. We'll be using the following:
+;kbitDown	equ 00h
+;kbitLeft	equ 01h
+;kbitRight	equ 02h
+;kbitUp		equ 03h
+;kbitYequ equ 04h
+;kbit2nd		equ 05h
+;kbitMode	equ 06h
+;kbitDel		equ 07h
+;You can find the other defines approximately where I found the stuff above.
 
+getkbd_adl:
+	ld  ix,mpKeyMode
+	lea hl,ix+0
+	ld  (hl),keyModeScanOnce
+	xor a
+_:  cp  (hl)
+	jr  nz,-_
+	ld  a,(ix+kbdG1-mpKeyRange)
+	ld  l,(ix+kbdG7-mpKeyRange)
+	xor L
+	and 11110000b	;mask out lower bits to let me shove dpad bits in
+	xor L
+	ret
+
+waituntilkeyrelease:
+    call getkbd_adl
+    or  a,a
+    jr  nz,waituntilkeyrelease
+	ret
+
+waituntilnewkeypress:
+    call waituntilkeyrelease
+_:  call getkbd_adl
+	or  a,a
+	jr  z,-_
+    ret
 
 #include "lcd.z80"
 #include "core.z80"
