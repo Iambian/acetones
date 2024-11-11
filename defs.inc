@@ -26,7 +26,8 @@ slopPos             .equ $D031F8        ;extra byte here
 debugram            .equ $D031F9        ;FA and FB occupied too.
 save_spl            .equ $D031FC        ;FD and FE occupied too.
 save_mbase          .equ $D031FF        ;
-core_memory_ix      .equ $D03280        ;occupies D03200 to D032FF
+vram_palette        .equ $D03200        ;64 bytes of color. It looks like itself
+core_memory_ix      .equ $D03280        ;IX range -128 to -64 already in use.
 scrap_mapping       .equ $D03300        ;256 bytes. maps to nowhere important.
 saferam1            .equ $D03400        ;1024 bytes available. Define later.
 main_ram            .equ $D03800        ;$0800 bytes of main system memory
@@ -46,11 +47,23 @@ USETABLE            .equ BASETABLE+USETABLE_OFFSET
 NAMETABLE1          .equ BASETABLE+(512*BASETABLE_STRIDE)
 NAMETABLE2          .equ NAMETABLE1 + 1024
 
+;
 ;saferam1 1024 bytes storage
 ;
-curScreenBuf        .equ saferam1           ;3b
+nametable00         .equ saferam1           ;4b Do not move these vars
+nametable01         .equ nametable00+4      ;4b
+nametable10         .equ nametable01+4      ;4b
+nametable11         .equ nametable10+4      ;4b
+nametable00_attrib  .equ nametable11+4      ;4b
+nametable01_attrib  .equ nametable00_attrib+4   ;4b
+nametable10_attrib  .equ nametable01_attrib+4   ;4b
+nametable11_attrib  .equ nametable10_attrib+4   ;4b
+chr_rom_tiles       .equ nametable11_attrib+4   ;4b
+chr_rom_sprites     .equ chr_rom_tiles+4    ;4b
+curScreenBuf        .equ chr_rom_sprites+4  ;4b
 linestart           .equ curScreenBuf+3     ;1b
-inputNumFiles       .equ linestart+1        ;1b
+chr_rom_curbank     .equ linestart+1        ;3b Base used for PPU stuff.
+inputNumFiles       .equ chr_rom_curbank+3  ;1b
 basefile_sig        .equ inputNumFiles+1    ;3b pointer to 16b hash
 missing_files       .equ basefile_sig+3     ;1b
 total_rom_size      .equ missing_files+1    ;3b
@@ -84,9 +97,11 @@ FILE_SIG_ADR_OFFSET .equ 5
 ;
 
 
-
 #define APU_KEYLATCH -1
 #define APU_KEYPAD -2   ;First to last: A,B,SE,ST,UP,DO,LE,RI. 01234567.
+#define PPU_XSCROLL -3
+#define PPU_YSCROLL -4
+#define PPU_CONFIG -5   ;6502 write at $2000.
 ;core memory
 #define REGA 0
 #define REGX 1
@@ -99,6 +114,8 @@ FILE_SIG_ADR_OFFSET .equ 5
 #define CURRENT_OPCODES 14
 #define CORE_STACK_BASE 17
 #define CORE_ERROR_LEVEL 20
+#define SCRAP_COUNTER 21
+#define PORT_WRITE_TIMESTAMP 24
 ;flag IDs
 #define SF_NEG 7
 #define SF_OVER 6 

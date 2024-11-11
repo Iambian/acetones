@@ -1,0 +1,188 @@
+;PPU-related stuff is written here, though not all of it is localized in
+;this file. Some of it will necessarily be located with the mapper code
+;that handles PPU I/O.
+
+
+    ;Do this before a lot of other things.
+    ;Select current character rom banks from PPU settings.
+    ld  hl,(chr_rom_base)
+    ld  bc,$001000
+    ld  a,(ix+PPU_CONFIG)
+    push hl
+        bit 4,a     ;background pattern base offset
+        jr  z,+_
+        add hl,bc
+_:      ld  (chr_rom_tiles),hl
+    pop hl
+    bit 5,a     ;sprite pattern base offset
+    jr  z,+_
+    add hl,bc
+_:  ld  (chr_rom_sprites),hl
+
+
+
+    ;B=Y, C=X. Obtain nametable address
+    ;You must preserve BC yourself. Somehow. Or not depending on how you loop.
+    ;B and C are modified to fit inside the nametable selected.
+    ld  hl,nametable00>>3
+    ld  a,b
+    sub 32
+    jr  c,+_
+    ld  a,b
+_:  ld  b,a
+    ccf
+    adc hl,hl
+    ld  a,c
+    sub 30
+    jr  c,+_
+    ld  a,c
+_:  ld  c,a
+    ccf
+    adc hl,hl
+    add hl,hl   ;HL is now a pointer. do ld hl,(hl) to get actual NT address.
+
+
+    ;Increment C=X, adjusting nametable pointer table in HL if crossover
+    inc c
+    ld  a,c
+    cp  a,32
+    jr  c,+_
+    ld  c,0
+    ld  a,L
+    xor a,%00000100
+    ld  L,a
+_:  nop
+
+    ;Increment B=Y, adjusting nametable pointer table in HL if crossover
+    inc b
+    ld  a,b
+    cp  a,30
+    jr  c,+_
+    ld  b,0
+    ld  a,L
+    xor a,%00001000
+    ld  L,a
+_:  nop
+
+    ;Retrieves attribute byte from B=Y, C=X
+    ;HL=nametable pointer table
+    ;NTptr tab low byte fmt: %000TIIAA. T=attrib, I=ID, A=address bytes
+    push de
+        ld  a,c
+        srl a
+        srl a   ;change 0-30 to 0-7. Discards low 2 bits.
+        ld  e,a
+        ld  a,b
+        and a,3 ;discard two lower bits
+        add a,a ;But place remaining bits up higher
+        add a,e ;A=%00YYYXXX
+        set 4,L ;swap to attrib
+        ld  de,(hl)
+        res 4,L ;swap back to main nametable pointers
+        add a,e ;base is $C0. This will not produce a carry.
+        ld  e,a
+        ld  a,(de)
+    pop de
+
+    ;Selects attribute from A from B=Y, C=X in format %0000AA00
+    bit 1,b
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,c
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+
+    ;Nametable/tilemap variant
+    ;Sets DE to current location in nametable wrt B=Y, C=X
+    ;HL=current nametable pointer
+    push hl
+        ld  hl,(hl)
+        ld  e,32
+        ld  d,b
+        mlt de
+        ld  a,e
+        add a,c
+        ld  e,a
+        add hl,de
+        ex  de,hl
+    pop hl
+
+    ;TODO: Find way to link stuff above. The task set forth is the following:
+    ;Create the main tile rendering loop. We must track the following:
+    ;   Screen pointer, nametable position, loop parameters.
+    ;With these, we will:
+    ;1. Get tileID from nametable position
+    ;2. Get attribute data associated with that tile.
+    ;3. Retrieve CHR_ROM data and
+    ;4. Combine it to retrieve color data, then write it to screen buffer.
+    ;
+    ;Later on, insert a cacheing step between 2 and 3. to selectively
+    ;modify step 4.
+
+
+
+
+
+
+
+
+
+
+    ld  c,(hl)
+    inc hl
+    ld  b,(hl)
+    inc hl
+    xor a,a
+
+
+
+
+
+
+
+
+
+
+
+    push hl
+        ld  hl,vram_palette
+        ex  hl,(sp) ;swapto: chr_rom
+        ld  (ix+SCRAP_COUNTER),8
+        ld  a,
+ppu_cacheTile_colLoop:
+        ld  c,(hl)
+        inc hl
+        ld  b,(hl)
+        inc hl
+        ex  hl,(sp) ;swapto: vram_palette
+        ;8 Iterations, unrolled.
+        ld  L,a     ;attrib table bits
+        sla b       ;2nd byte of sprite
+        rl  L       ;
+        sla c       ;1st byte of sprite
+        rl  L       ;L = %0000AA21. HL=offset into palette table
+        inc c       ;Set b0 of C to 1 to ensure LDI does not disturb BC.
+        ldi         ;Color code (HL) -> Sprite buffer (DE)
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;2/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;3/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;4/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;5/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;6/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;7/8
+        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;8/8 96b tot
+
+
+
+
+
+
+
+
+
+
+

@@ -550,6 +550,38 @@ _:  ld  hl,(prg_rom_size)
     jr  nc,+_
     sla c
 _:  call i6502_map_pages
+    ;map in nametable mirroring
+    ld  hl,NAMETABLE1
+    ld  de,NAMETABLE2
+    ld  (nametable00),hl
+    ld  (nametable11),de
+    bit 0,(ix+6)    ;nametable arrangement. Mapper 0 has no alternates.
+    jr  z,+_
+    ex  de,hl
+_:  ld  (nametable01),hl
+    ld  (nametable10),de
+    ;Fill out nametable attrib pointers
+    ld  hl,nametable00
+    ld  bc,960
+    ld  a,4
+_:  ld  de,(hl)
+    set 4,L
+    ex  de,hl
+    add hl,bc
+    ex  de,hl
+    ld  (hl),de
+    res 4,L
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    dec a
+    jr  nz,-_
+    ;initilize chr_rom current bank address.
+    ;This mapper does not allow any additional banks, but if it does, this
+    ;value must be recalculated from chr_rom_base
+    ld  hl,(chr_rom_base)
+    ld  (chr_rom_curbank),hl
     ret
 
 
