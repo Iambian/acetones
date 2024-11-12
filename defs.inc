@@ -96,12 +96,15 @@ FILE_SIG_ADR_OFFSET .equ 5
 ;
 ;
 
-
-#define APU_KEYLATCH -1
-#define APU_KEYPAD -2   ;First to last: A,B,SE,ST,UP,DO,LE,RI. 01234567.
-#define PPU_XSCROLL -3
-#define PPU_YSCROLL -4
+#define PPU_NAMETABLE_PTR -11
+#define PPU_VCOUNT -8
+#define PPU_HCOUNT -7
+#define PPU_TCOUNT -6
 #define PPU_CONFIG -5   ;6502 write at $2000.
+#define PPU_XSCROLL -4
+#define PPU_YSCROLL -3
+#define APU_KEYPAD -2   ;First to last: A,B,SE,ST,UP,DO,LE,RI. 01234567.
+#define APU_KEYLATCH -1
 ;core memory
 #define REGA 0
 #define REGX 1

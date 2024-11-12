@@ -109,7 +109,7 @@ _:  and a,%00001100
         add a,c
         ld  e,a
         add hl,de
-        ex  de,hl
+        ;ex  de,hl
     pop hl
 
     ;TODO: Find way to link stuff above. The task set forth is the following:
@@ -123,58 +123,194 @@ _:  and a,%00001100
     ;
     ;Later on, insert a cacheing step between 2 and 3. to selectively
     ;modify step 4.
+    ;
+    ; Do in the inlining thing later.
+    ;
 
 
 
-
-
-
-
-
-
-
-    ld  c,(hl)
-    inc hl
-    ld  b,(hl)
-    inc hl
-    xor a,a
-
-
-
-
-
-
-
-
-
-
-
+ppu_DrawBG:
+    ;set base rom addresses
+    ld  hl,(chr_rom_base)
+    ld  bc,$001000
+    ld  a,(ix+PPU_CONFIG)
     push hl
-        ld  hl,vram_palette
-        ex  hl,(sp) ;swapto: chr_rom
-        ld  (ix+SCRAP_COUNTER),8
-        ld  a,
-ppu_cacheTile_colLoop:
-        ld  c,(hl)
-        inc hl
-        ld  b,(hl)
-        inc hl
-        ex  hl,(sp) ;swapto: vram_palette
-        ;8 Iterations, unrolled.
-        ld  L,a     ;attrib table bits
-        sla b       ;2nd byte of sprite
-        rl  L       ;
-        sla c       ;1st byte of sprite
-        rl  L       ;L = %0000AA21. HL=offset into palette table
-        inc c       ;Set b0 of C to 1 to ensure LDI does not disturb BC.
-        ldi         ;Color code (HL) -> Sprite buffer (DE)
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;2/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;3/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;4/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;5/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;6/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;7/8
-        ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;8/8 96b tot
+        bit 4,a     ;background pattern base offset
+        jr  z,+_
+        add hl,bc
+_:      ld  (chr_rom_tiles),hl
+    pop hl
+    bit 5,a     ;sprite pattern base offset
+    jr  z,+_
+    add hl,bc
+_:  ld  (chr_rom_sprites),hl
+    ;set coarse x,y scroll positions. B=Y, C=x
+    ld  bc,(ix+PPU_XSCROLL)
+    sla b
+    sla b
+    sla b
+    sla c
+    sla c
+    sla c
+    ;set base nametable addresses
+    ld  hl,nametable00
+    ld  a,(ix+PPU_CONFIG)
+    and a,3
+    add a,a
+    add a,a
+    ld  L,a
+    ld  (ix+PPU_NAMETABLE_PTR),hl   ;yeah. let's cache this so we don't lose it
+    ;In-place setting of nametable address wrt X,Y
+    ;%------YY YYYXXXXX
+    ld  de,(hl)
+    ld  a,c
+    rlca
+    rlca
+    rlca
+    ld  e,a
+    xor a,d
+    and a,%00000011
+    xor a,d
+    ld  a,e
+    xor a,b
+    and %11100000
+    xor a,b
+    ld  e,a
+    ;Fetch first attribute byte from address
+    ;%------YY YYYXXXXX -> %------11 11YYYXXX
+    push de
+        ld  a,d
+        rra
+        srl e
+        rra
+        srl e       ;YYYYYXXX
+        set 0,d
+        set 1,d
+        ld  a,e
+        rlca
+        rlca
+        or  a,%11000000
+        xor a,e
+        and a,%11111000
+        xor a,e
+        ld  e,a
+        ld  a,(de)
+    pop de
+    ;Selects attribute from A from B=Y, C=X in format %0000AA00
+    ;Let's instead use DE %------yy yYyxxxXx y: e6, x: e1
+    bit 6,e
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,e
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+    ld  (ppu_mainTileLoop_attribute_write),a
+
+    ld  (ix+PPU_VCOUNT),30
+    ld  iy,(curScreenBuf)
+    lea iy,iy+32
+ppu_verticalLoop:
+    ld  (ix+PPU_HCOUNT),32
+ppu_horizontalLoop:
+    ld  a,(de)
+    push hl
+        push de
+            ld  hl,(chr_rom_tiles)
+            ld  c,a
+            ld  b,16
+            mlt bc
+            add hl,bc
+            ld  (ix+PPU_TCOUNT),8
+            lea de,iy+0
+ppu_mainTileLoop:
+            ld  c,(hl)
+            inc hl
+            ld  b,(hl)
+            inc hl
+            push hl
+                ld  hl,vram_palette
+ppu_mainTileLoop_attribute_write    .equ $+1
+                ld  a,0
+                ;Attrib to LSB of VRAM_PALETTE, shift CHR_ROM data to LSB to
+                ;form full address+offset. Copy from palette to buffer.
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;1/8 12b apiece
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;2/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;3/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;4/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;5/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;6/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;7/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;8/8 96b tot
+                ld  hl,320-8
+                add hl,de
+                ex  de,hl
+            pop hl
+            dec (ix+PPU_TCOUNT)
+            jr  nz,ppu_mainTileLoop
+            ;start wrapping up the horizontal loop
+        pop de
+    pop hl
+    ld  a,e
+    inc de
+    xor a,e
+    bit 5,a     ;A carry in X would result in a change in bit 5
+    jr  z,+_    ;Which means there's no crossover if no sign change
+    dec de      ;revert those changes in case they cascaded past E
+    inc e
+    and a,%11100000     ;The funny thing is that the XOR above...
+    xor a,e             ;... is still valid for this masking technique.
+    ld  c,a     ;And now let's squirrel this and...
+    ld  b,d     ;...D for later merge magic
+    ld  a,h
+    xor a,%00000100 ;flip to the next horizontal buffer...
+    ld  h,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor d
+    and a,%00000011
+    xor d
+    ld  d,a         ;and map coords into a new nametable
+_:  lea iy,iy+8     ;next position on the buffer.
+    dec (ix+PPU_HCOUNT)
+    jp  nz,ppu_horizontalLoop
+    ;the X buffer *will* have changed at some point and rolled around
+    ;so there's no need to deal with X. Still gotta do Y first...
+    ex  de,hl
+    ld  a,h
+    ld  bc,%00100000
+    add hl,bc   ;%-----^yy yYyxxxXx
+    ex  de,hl
+    ld  c,e     ;coordinate storage.
+    ld  b,d
+    xor a,d     ;detect sign change in bit 2
+    bit 2,a
+    jr  z,+_
+    ld  a,L
+    xor a,%00001000 ;flip to the next vertical buffer...
+    ld  L,a
+_:  ld  a,L
+    xor a,%00000100 ;flip back the horizontal buffer that must've been flipped.
+    ld  L,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor d
+    and a,%00000011
+    xor d
+    ld  d,a         ;and map coords into a new nametable
+    ld  bc,(320*7)+(320-256)
+    add iy,bc       ;move cursor pointer to the next row
+    dec (ix+PPU_VCOUNT)
+    jp  nz,ppu_verticalLoop
+    ret
+
+
 
 
 
