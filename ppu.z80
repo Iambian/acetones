@@ -129,7 +129,8 @@ _:  and a,%00001100
 
 
 
-ppu_DrawBG:
+
+ppu_drawBG:
     ;set base rom addresses
     ld  hl,(chr_rom_base)
     ld  bc,$001000
@@ -310,7 +311,14 @@ _:  ld  a,L
     jp  nz,ppu_verticalLoop
     ret
 
-
+;TODO: Test changes to the PPU and link together something in the mapper
+;to perform controls. Also. Those freakin' interrupts. DO THEM.
+;Might also want to implement a drawlist of sorts since writes to the ports
+;ought to be timestamped. That way, we'll be able to tell what the hell is
+;being done mid-frame and then make adjustments to such things as
+;BG rendering mid-draw, if necessary. Or be able to detect such attempts as
+;I don't think I want to deal with that. Only deal with stuff that should
+;be occurring within the VBlank period.
 
 
 

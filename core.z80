@@ -87,9 +87,13 @@ i6502Init:
     set 0,a ;turn on timer 1
     ld  ($F20030),a
 
+i6502RetryFirstLoad:    ;reentrant from ISR handler
+    ld.s de,(ix+REGPC)
+    dec de
+    jr +_
 i6502FirstLoad:
     ld.s de,(ix+REGPC)
-    ld  a,e
+_:  ld  a,e
     ld  e,BASETABLE_STRIDE
     mlt de
     ld  hl,PAGETABLE
@@ -179,11 +183,11 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
 #endif
     push hl
         lea hl,iy
+i6502_interrupt_timer   .equ $+1
         ld  bc,-26548
         add hl,bc
-        jr nc,+_
-    pop hl \ ret
-_:
+        jr  c,i6502_take_interrupt
+i6502_continue_instruction_fetch:
         ld  h,a
         ld  l,BASETABLE_STRIDE
         mlt hl
@@ -192,6 +196,27 @@ _:
         ld  hl,(hl)     ;jumptable
         ex  (sp),hl     ;exch with exec addr, jumpto-via-ret
     ret
+
+i6502_no_interrupts:
+        ;This is what happens when you let the core run without setting
+        ;up interrupts. It'll be up to the hardware access subroutines
+        ;to configure interrupts from now on. See "coreint.z80" for
+        ;more information
+        ld  hl,$800000  ;INT_MIN. Prevent retry for as long as possible.
+        ld  (i6502_take_interrupt),hl
+        jp  i6502_continue_instruction_fetch
+
+i6502_take_interrupt:
+        ld  h,a
+        ld  a,(int_table_len)
+        or  a,a
+        ld  a,h
+        jr  z,i6502_no_interrupts
+    pop hl
+    xor a,a
+    ld  (ix+REGPC+0),e
+    ld  hl,(INT_TABLE)  ;Find the routines in "coreint.z80" that handles
+    jp  (hl)            ;and maintains the interrupt table being used here.
 
 
 ;Instructions one byte wide returns to the main loop via:

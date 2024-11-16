@@ -1,0 +1,121 @@
+; Code to handle interrup servicer. Note: This hinges on 
+; PPU timing, so some of its initilization code will end up here too.
+;
+
+
+
+ppu_init:
+    ;ACTUALLY. PPU MEMORY DOESN'T REQUIRE INITIALIZATION. THAT'S TAKEN CARE OF
+    ;DURING CORE INIT. THIS BEHAVIOR WON'T WORK ON FAMICOM EMULATION, BUT MEH.
+    ret
+
+
+
+
+
+
+
+int6502_init:
+    xor a,a
+    ld  (int_table_len),a
+    ret
+
+;DE=ISRToPush, BC=CallWhenThisClockIsPassed
+;This routine is called in the ISR handler to both acknowledge the consumption
+;of its turn at the ISR, and to (potentially) push another entry to the stack.
+;This does not affect ths size of a table since this is a combined
+;pop-and-insert operation
+int6502_pushISRAfterPop:
+    ld  ix,INT_TABLE
+    ld  a,(ix-1)        ;length of the table
+    or  a,a
+    jr  nz,+_       ;Jump not taken: Push first and only entry
+_:  ld  (ix-1),1
+    ld  (ix+0),de
+    ld  (ix+3),bc
+    ld  ix,core_memory_ix
+    ret
+_:  dec a
+    jr  z,--_       ;Jump taken: Replace first and only entry since we ate it.
+    ;Loop steps:
+    ;If not loopCounter or BC < ix[0].T:
+    ;   ix[-1] = DE,BC
+    ;   STOP.
+    ;Else:
+    ;   ix[-1] = ix[0]
+    ;   ix += STRIDE
+    ;   --loopCounter;
+int6502_pushISRAfterPop_loop:
+    lea ix,ix+INT_TABLE_STRIDE
+    or  a,a
+    jr  z,+_
+    ld  hl,(ix+INT_CYCLE_OFFSET)
+    sbc hl,bc   ;C if ix[0]<BC
+    jr  nc,++_
+_:  ld  (ix+INT_ADDR_OFFSET),de
+    ld  (ix+INT_CYCLE_OFFSET),bc
+    ld  ix,core_memory_ix
+    ret
+_:  ld  hl,(ix+INT_ADDR_OFFSET)
+    ld  (ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE),hl
+    ld  hl,(ix+INT_CYCLE_OFFSET)
+    ld  (ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE),hl
+    dec a
+    jr int6502_pushISRAfterPop_loop
+    
+;DE=ISRToPush, BC=CallWhenThisClockIsPassed
+;This actually adds an entry to the stack.
+int6502_insertISA:
+    ld  ix,INT_TABLE
+    ld  a,(ix-1)
+    or  a,a
+    jr  nz,+_
+    ld  (ix-1),1
+    ld  (ix+0),de
+    ld  (ix+3),bc
+    ld  ix,core_memory_ix
+    ret
+_:  cp  a,INT_TABLE_MAXLEN
+    ret z       ;do not attempt to insert if table is maxed out
+    push bc
+        ld  b,a
+        ld  c,INT_TABLE_STRIDE
+        mlt bc
+        add ix,bc   ;at end of table
+    pop bc
+    ;Loop details. IX points at entry after last:
+    ;if not loopCtr or ix[-1].T < BC:
+    ;   ix[0] = DE,BC , STOP.
+    ;else:
+    ;   ix[0] = ix[-1], ix-=STRIDE, loopCtr--
+int6502_insertISA:
+    or  a,a
+    jr  z,+_
+    ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
+    sbc hl,bc   ;C if ix[-1]<BC
+    jr  c,++_
+_:  ld  (ix+INT_ADDR_OFFSET),de
+    ld  (ix+INT_CYCLE_OFFSET),bc
+    ld  ix,core_memory_ix
+    ret
+_:  ld  hl,(ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE)
+    ld  (ix+INT_ADDR_OFFSET),hl
+    ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
+    ld  (ix+INT_CYCLE_OFFSET),hl
+    lea ix,ix-INT_TABLE_STRIDE
+    dec a
+    jr int6502_insertISA
+    
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -811,6 +811,7 @@ _:  call getkbd_adl
     ret
 
 #include "lcd.z80"
+#include "coreint.z80"
 #include "core.z80"
 #include "debug.z80"
 #include "ppu.z80"
