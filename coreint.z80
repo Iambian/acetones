@@ -107,6 +107,29 @@ _:  ld  hl,(ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE)
     jr int6502_insertISA
     
 
+int6502_removeTop:
+    ld  ix,INT_TABLE
+    ld  a,(ix-1)
+    or  a,a
+    jr  z,+_
+    dec (ix-1)
+    ld  c,a
+    ld  b,INT_TABLE_STRIDE
+    mlt bc
+    lea ix,ix+INT_TABLE_STRIDE
+    lea de,ix-INT_TABLE_STRIDE
+    lea hl,ix+0
+    ldir
+    push de
+    pop hl
+    inc de
+    ld  (hl),c
+    ld  c,INT_TABLE_STRIDE-1
+    ldir
+_:  ld ix,core_memory_ix
+    ret    
+
+
 
 
 
