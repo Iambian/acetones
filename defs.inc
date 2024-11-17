@@ -77,7 +77,8 @@ trainer_base        .equ mapper_adr_base+3  ;3b. If exist, starts here
 prg_rom_base        .equ mapper_adr_base+3  ;3b. Adjusted in case of trainer.
 chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
 chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
-timings_base        .equ chr_rom_base_file+1    ;3b. Current pointer to timings
+ppu_smc_gate        .equ chr_rom_base_file+1 ;3b write address to ungate PPU
+timings_base        .equ ppu_smc_gate+3    ;3b. Current pointer to timings
 
 SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
@@ -103,21 +104,29 @@ INT_CYCLE_OFFSET    .equ 3
 
 ;
 ;
-#define PPU_SUBCYCLE -19    ;0, 1, or 2.
-#define PPU_OAMADDRESS -18  ;1B POINTER WITHIN OAM
-#define PPU_ADDRESS -17     ;I/O PTR FOR PPU ADDRESS SPACE $0000-$3FFF.
-#define PPU_W -15           ;INTERNAL W REGISTER FOR HIGH/LOW BYTE PORT WRITES
-#define PPU_FRAMECOUNT -14  ;USED FOR EVEN/ODD
-#define PPU_MASK -13        ;$2001 PPUMASK
-#define PPU_STATUS -12      ;$2002 PPUSTATUS
-#define PPU_NAMETABLE_PTR -11
-#define PPU_VCOUNT -8
-#define PPU_HCOUNT -7
-#define PPU_TCOUNT -6
-#define PPU_CTRL -5     ;I guess an alternate name for this???
-#define PPU_CONFIG -5   ;6502 write at $2000.
-#define PPU_XSCROLL -4
-#define PPU_YSCROLL -3
+;
+;
+
+;PPU default locations. Some are not used
+#define PPU_CTRL -32
+#define PPU_MASK -31
+#define PPU_STATUS -30
+#define PPU_OAMADDR -29
+#define PPU_OAMDATA -28
+#define PPU_SCROLL -27
+#define PPU_ADDR -26
+#define PPU_DATA -25
+;PPU internal stuff
+#define PPU_SUBCYCLE -15    ;0, 1, or 2.
+#define PPU_V -14           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)
+#define PPU_W -12           ;INTERNAL W REGISTER FOR HIGH/LOW BYTE PORT WRITES
+#define PPU_FRAMECOUNT -11  ;USED FOR EVEN/ODD
+#define PPU_NAMETABLE_PTR -10   ;Pointer cache
+#define PPU_VCOUNT -7
+#define PPU_HCOUNT -6
+#define PPU_TCOUNT -5
+#define PPU_XSCROLL -4  ;Should be constructed from PPU_SCROLL
+#define PPU_YSCROLL -3  ;
 #define APU_KEYPAD -2   ;First to last: A,B,SE,ST,UP,DO,LE,RI. 01234567.
 #define APU_KEYLATCH -1
 ;core memory

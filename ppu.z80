@@ -7,7 +7,7 @@
     ;Select current character rom banks from PPU settings.
     ld  hl,(chr_rom_base)
     ld  bc,$001000
-    ld  a,(ix+PPU_CONFIG)
+    ld  a,(ix+PPU_CTRL)
     push hl
         bit 4,a     ;background pattern base offset
         jr  z,+_
@@ -154,6 +154,8 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     ld  de,ppu_isr
     call int6502_pushISRAfterPop
     set 7,(ix+PPU_STATUS)
+    ld  hl,(ppu_smc_gate)
+    ld  (hl),$00        ;nop out ret so writes no longer ignored.
     ;
     ; TODO: Figure this one out:
     ; Do we need something to unset VBlank active flag at the end of
@@ -174,7 +176,7 @@ ppu_drawBG:
     ;set base rom addresses
     ld  hl,(chr_rom_base)
     ld  bc,$001000
-    ld  a,(ix+PPU_CONFIG)
+    ld  a,(ix+PPU_CTRL)
     push hl
         bit 4,a     ;background pattern base offset
         jr  z,+_
@@ -195,7 +197,7 @@ _:  ld  (chr_rom_sprites),hl
     sla c
     ;set base nametable addresses
     ld  hl,nametable00
-    ld  a,(ix+PPU_CONFIG)
+    ld  a,(ix+PPU_CTRL)
     and a,3
     add a,a
     add a,a

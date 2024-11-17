@@ -584,6 +584,9 @@ _:  ld  de,(hl)
     ;value must be recalculated from chr_rom_base
     ld  hl,(chr_rom_base)
     ld  (chr_rom_curbank),hl
+    ld  hl,mapper0_ppu_write
+    ld  (ppu_smc_gate),hl
+    ld  (hl),$C9    ;ret. Will write nop here during first NMI handle
     ret
 
 
@@ -603,7 +606,7 @@ _:  add a,a
     ld  a,(hl)
     ret
 mapper0_apu_read:
-    ld  a,e
+    ld  a,c
     cp  a,$16
     jr  nz,+_
     xor a,a
@@ -613,10 +616,26 @@ mapper0_apu_read:
 _:  ld  a,(hl)  ;hope that the dummy map page is good enough to not crash.
     ret
 mapper0_ppu_read:
-    ;TODO: PPU SUPPORT
-    ld  a,(hl)
+    ld  a,c
+    and a,%00000111
+    cp  a,$07
+    jr  z,mapper0_ppu_read_ppudata
+    cp  a,$04
+    jr  z,mapper0_ppu_read_oamdata
+    ;We should ignore reads from write-only registers but i'm sure nothing
+    ;will come of allowing it.
+    lea hl,ix+PPU_CTRL
+    ld  a,l
+    add a,c
+    ld  l,a
+    ld  a,(hl)  
     ret
-
+mapper0_ppu_read_ppudata:
+    ;TODO: Allow reading from VRAM
+    ret
+mapper0_ppu_read_oamdata:
+    ;TODO: Allow reading from OAM
+    ret
 
 
 mapper0_write:
@@ -633,7 +652,7 @@ _:  cp  a,$40
     ld  (hl),b  ;but allow it in $4100-$7FFF because it might be RAM.
     ret
 mapper0_apu_write:
-    ld  a,e
+    ld  a,c
     cp  a,$16
     jr  nz,+_
     ld  a,(ix+APU_KEYLATCH)
@@ -687,12 +706,41 @@ _:  ;not even going to try to emulate the second controller.
     ld  (hl),b
     ret
 mapper0_ppu_write:
-    ld  (hl),b
     ret
+    ;TODO: gate off access outside VBlank
+    ;TODO: Replace cp/jr chain with DJNZ chain for more optimal branching.
+    ld  a,c
+    and a,%00000111
+;    cp  a,$01  ;Once midframe is supported, uncomment this.
+;    jr  z,mapper0_ppu_write_ppumask
+    cp  a,$02
+    ret z   ;read-only register. do not write to it.
+    cp  a,$04
+    jr  z,mapper0_ppu_write_oamdata
+    cp a,$06
+    jr  z,mapper0_ppu_write_ppuaddr
+    cp  a,$07
+    jr  z,mapper0_ppu_write_ppudata
+;    cp  a,$05  ;Once midframe is supported, uncomment this.
+;    jr  z,mapper0_ppu_write_ppuscroll
 
 
-
-
+mapper0_ppu_write_oamdata:
+    ;TODO: Allow writes to OAM data
+    ret
+mapper0_ppu_write_ppuaddr:
+    ;TODO: Allow setting addresses to VRAM
+    ret
+mapper0_ppu_write_ppudata:
+    ;TODO: Allow writes to VRAM.
+    ret
+mapper0_ppu_write_ppumask:
+    ;TODO: Allow queueing for midframe writes.
+    ret
+mapper0_ppu_write_ppuscroll:
+    ;TODO: Allow queueing for midframe writes. Often used in conjunction
+    ;with Sprite0 hits for status bar rendering.
+    ret
 
 
 loadROMFile_tempSig:    ;total 23 bytes
