@@ -127,6 +127,46 @@ _:  and a,%00001100
     ; Do in the inlining thing later.
     ;
 
+;Some bits of this is in "coreint.z80"
+ppu_isr:
+    ld  a,(ix+PPU_CTRL)
+    and a,%00011000     ;sprite and background. if zero, no rendering happens.
+    jr  z,ppu_isr_nodraw
+    ;perform the check that makes odd cycles one ppu cc shorter, but only if
+    ;something is being rendered to the screen
+    ld  a,(ix+PPU_FRAMECOUNT)
+    rrca
+    jr  nc,+_
+    dec (ix+PPU_SUBCYCLE)
+_:  ;there... should be something else to do?
+    ;call ppu_drawBGSprites
+    call ppu_drawBG
+    ;call ppu_drawFGSprites
+ppu_isr_nodraw:
+    ld  bc,27939
+    ld  a,(ix+PPU_SUBCYCLE)
+    add a,2     ;add the 2/3rds cycle
+    cp  a,3     ;but is it more than 3? (0,1,2)
+    jr  c,+_
+    sub a,3
+    inc bc
+_:  ld  (ix+PPU_SUBCYCLE),a
+    ld  de,ppu_isr
+    call int6502_pushISRAfterPop
+    set 7,(ix+PPU_STATUS)
+    ;
+    ; TODO: Figure this one out:
+    ; Do we need something to unset VBlank active flag at the end of
+    ; VBlank if left unread?
+    ;
+    bit 7,(ix+PPU_CTRL)     ;VBlank NMI enable flag
+    jp  z,i6502RetryFirstLoad
+    ld  a,$FF
+    ld  (ix+NMI_TRIGGERED),a
+    jp  inst6502_brk
+
+
+
 
 
 

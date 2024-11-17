@@ -150,6 +150,8 @@ _:  ld  e,(hl)
     ld  (ix+0),hl
     ld  (ix+3),a
 
+    call int6502_init
+    call ppu_init
     call i6502Init
 
 

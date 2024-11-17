@@ -15,7 +15,7 @@
 #define WRITE_ACCESS call mapper0_write
 ;Later, put in actual test. Z if not triggered, NZ if triggered. This
 ;alters the behavior of the BRK instruction.
-#define WAS_NMI_TRIGGERED or  a
+#define WAS_NMI_TRIGGERED bit 0,(ix+NMI_TRIGGERED)
 
 #define OPRFLG_C res SF_CARRY,b \ jr nc,$+4 \ set SF_CARRY,b
 #define OPRFLG_V res SF_OVER,b \ jp po,$+6 \ set SF_OVER,b

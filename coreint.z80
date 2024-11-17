@@ -7,13 +7,41 @@
 ppu_init:
     ;ACTUALLY. PPU MEMORY DOESN'T REQUIRE INITIALIZATION. THAT'S TAKEN CARE OF
     ;DURING CORE INIT. THIS BEHAVIOR WON'T WORK ON FAMICOM EMULATION, BUT MEH.
+    xor a,a
+    ld  (int_table_len),a
+    ld  de,ppu_isr
+    ld  bc,27939
+    call int6502_insertISA  ;sets ix. ix before this unknown.
+    ld  (ix+PPU_SUBCYCLE),2
     ret
 
 
-
-
-
-
+int6502_updateIntCounter:
+    ld  hl,int_table_len
+    ld  a,(hl)
+    or  a,a
+    ret z
+    inc hl  ;advance to first pointer
+    inc hl
+    inc hl
+    inc hl  ;advanced to first time
+    ld  hl,(hl)
+    ;neg hl
+    ld  (ix+TEMP_MEMORY),hl
+    ld  a,(ix+TEMP_MEMORY+2)
+    cpl
+    ld  (ix+TEMP_MEMORY+2),a
+    ld  a,l
+    cpl
+    ld  l,a
+    ld  a,h
+    cpl
+    ld  h,a
+    ld.s (ix+TEMP_MEMORY),hl
+    ld  hl,(ix+TEMP_MEMORY)
+    ;load to clock counter in "core.z80"
+    ld  (i6502_interrupt_timer),hl
+    ret
 
 int6502_init:
     xor a,a
@@ -55,7 +83,7 @@ int6502_pushISRAfterPop_loop:
 _:  ld  (ix+INT_ADDR_OFFSET),de
     ld  (ix+INT_CYCLE_OFFSET),bc
     ld  ix,core_memory_ix
-    ret
+    jp  int6502_updateIntCounter
 _:  ld  hl,(ix+INT_ADDR_OFFSET)
     ld  (ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE),hl
     ld  hl,(ix+INT_CYCLE_OFFSET)
@@ -74,7 +102,7 @@ int6502_insertISA:
     ld  (ix+0),de
     ld  (ix+3),bc
     ld  ix,core_memory_ix
-    ret
+    jp  int6502_updateIntCounter
 _:  cp  a,INT_TABLE_MAXLEN
     ret z       ;do not attempt to insert if table is maxed out
     push bc
@@ -88,7 +116,7 @@ _:  cp  a,INT_TABLE_MAXLEN
     ;   ix[0] = DE,BC , STOP.
     ;else:
     ;   ix[0] = ix[-1], ix-=STRIDE, loopCtr--
-int6502_insertISA:
+int6502_insertISA_Loop:
     or  a,a
     jr  z,+_
     ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
@@ -97,14 +125,14 @@ int6502_insertISA:
 _:  ld  (ix+INT_ADDR_OFFSET),de
     ld  (ix+INT_CYCLE_OFFSET),bc
     ld  ix,core_memory_ix
-    ret
+    jp  int6502_updateIntCounter
 _:  ld  hl,(ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE)
     ld  (ix+INT_ADDR_OFFSET),hl
     ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
     ld  (ix+INT_CYCLE_OFFSET),hl
     lea ix,ix-INT_TABLE_STRIDE
     dec a
-    jr int6502_insertISA
+    jr int6502_insertISA_Loop
     
 
 int6502_removeTop:

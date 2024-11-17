@@ -108,12 +108,13 @@ INT_CYCLE_OFFSET    .equ 3
 #define PPU_ADDRESS -17     ;I/O PTR FOR PPU ADDRESS SPACE $0000-$3FFF.
 #define PPU_W -15           ;INTERNAL W REGISTER FOR HIGH/LOW BYTE PORT WRITES
 #define PPU_FRAMECOUNT -14  ;USED FOR EVEN/ODD
-#define PPU_MASK -13
-#define PPU_CTRL -12
+#define PPU_MASK -13        ;$2001 PPUMASK
+#define PPU_STATUS -12      ;$2002 PPUSTATUS
 #define PPU_NAMETABLE_PTR -11
 #define PPU_VCOUNT -8
 #define PPU_HCOUNT -7
 #define PPU_TCOUNT -6
+#define PPU_CTRL -5     ;I guess an alternate name for this???
 #define PPU_CONFIG -5   ;6502 write at $2000.
 #define PPU_XSCROLL -4
 #define PPU_YSCROLL -3
@@ -133,6 +134,8 @@ INT_CYCLE_OFFSET    .equ 3
 #define CORE_ERROR_LEVEL 20
 #define SCRAP_COUNTER 21
 #define PORT_WRITE_TIMESTAMP 24
+#define TEMP_MEMORY 27
+#define NMI_TRIGGERED 30 
 ;flag IDs
 #define SF_NEG 7
 #define SF_OVER 6 
