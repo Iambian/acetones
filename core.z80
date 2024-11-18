@@ -57,9 +57,9 @@ i6502Init:
     ;
     ld  ix,core_memory_ix
     ld  iy,2    ;8 cycle startup. Hooking into inst6502_jsr for init
-    lea hl,ix-128
-    lea de,ix-127
-    ld  bc,255
+    lea hl,ix
+    lea de,ix+1
+    ld  bc,126
     ld  (hl),$00
     ldir
     ;

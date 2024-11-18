@@ -127,6 +127,46 @@ _:  and a,%00001100
     ; Do in the inlining thing later.
     ;
 
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+;    ***   *** ***** *   *  ***  *          *** ***** *   * ***** *****
+;   *   * *      *   *   * *   * *         *      *   *   * *     *    
+;   ***** *      *   *   * ***** *          ***   *   *   * ***   ***  
+;   *   * *      *   *   * *   * *             *  *   *   * *     *    
+;   *   *  ***   *    ***  *   * *****      ***   *    ***  *     *    
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+;
+ppu_init:
+    ;
+    ld  ix,core_memory_ix
+    lea hl,ix-128
+    lea de,ix-127
+    ld  bc,126
+    ld  (hl),$00
+    ldir
+    ;
+    ld  a,WREG_CONST
+    ld  (ix+PPU_W),a
+    ;
+    ld  de,mpLcdPalette
+    ld  hl,paletteData
+    ld  bc,64*2
+    ldir
+    ;
+
+
+    xor a,a
+    ld  (int_table_len),a
+    ld  de,ppu_isr
+    ld  bc,27939
+    call int6502_insertISA  ;sets ix. ix before this unknown.
+    ld  (ix+PPU_SUBCYCLE),2
+    ret
+
+
+
 ;Some bits of this is in "coreint.z80"
 ppu_isr:
     ld  a,(ix+PPU_CTRL)
@@ -271,10 +311,11 @@ ppu_horizontalLoop:
             ld  (ix+PPU_TCOUNT),8
             lea de,iy+0
 ppu_mainTileLoop:
-            ld  c,(hl)
-            inc hl
+            ld  a,(hl)
+            ld  bc,8
+            add hl,bc
             ld  b,(hl)
-            inc hl
+            ld  c,a
             push hl
                 ld  hl,vram_palette
 ppu_mainTileLoop_attribute_write    .equ $+1
@@ -293,6 +334,8 @@ ppu_mainTileLoop_attribute_write    .equ $+1
                 add hl,de
                 ex  de,hl
             pop hl
+            ld  bc,-7
+            add hl,bc
             dec (ix+PPU_TCOUNT)
             jr  nz,ppu_mainTileLoop
             ;start wrapping up the horizontal loop

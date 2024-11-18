@@ -4,18 +4,6 @@
 
 
 
-ppu_init:
-    ;ACTUALLY. PPU MEMORY DOESN'T REQUIRE INITIALIZATION. THAT'S TAKEN CARE OF
-    ;DURING CORE INIT. THIS BEHAVIOR WON'T WORK ON FAMICOM EMULATION, BUT MEH.
-    xor a,a
-    ld  (int_table_len),a
-    ld  de,ppu_isr
-    ld  bc,27939
-    call int6502_insertISA  ;sets ix. ix before this unknown.
-    ld  (ix+PPU_SUBCYCLE),2
-    ret
-
-
 int6502_updateIntCounter:
     ld  hl,int_table_len
     ld  a,(hl)

@@ -622,19 +622,72 @@ mapper0_ppu_read:
     jr  z,mapper0_ppu_read_ppudata
     cp  a,$04
     jr  z,mapper0_ppu_read_oamdata
+    cp  a,$02   ;gotta break this out since reading ppustatus does other stuff
+    jr  z,mapper0_ppu_read_ppustatus
     ;We should ignore reads from write-only registers but i'm sure nothing
     ;will come of allowing it.
-    lea hl,ix+PPU_CTRL
+_:  lea hl,ix+PPU_CTRL
     ld  a,l
     add a,c
     ld  l,a
     ld  a,(hl)  
     ret
+mapper0_ppu_read_ppustatus:
+    ;reading ppustatus does additional things.
+    ld  a,WREG_CONST
+    ld  (ix+PPU_W),a
+    jr -_
 mapper0_ppu_read_ppudata:
-    ;TODO: Allow reading from VRAM
+    ld  a,(ix+PPU_V+1)
+    ld  c,a
+    and a,%00111111
+    cp  a,$20
+    jr  nc,+_   ;skip reading from CHR_ROM
+    push de
+        ex.s de,hl  ;clears DEU
+        ld  hl,(chr_rom_curbank)
+        ld  d,a
+        ld  e,(ix+PPU_V+0)
+        add hl,de
+    pop de
+    ld  a,(hl)
+    ret
+_:  cp  a,$3F
+    jr  nz,+_
+    ld  a,(ix+PPU_V+0)
+    and a,%00111111
+    ld  hl,vram_palette
+    ld  L,a
+    ld  a,(hl)
+    ret
+_:  and a,%00001100     ;%00ZZTTaa Z:00,01=CHR,02=NT,03=PAL; T:WhichNT; a:adrHI
+    ld  hl,nametable00
+    ld  L,a             ;bits already in position to index the table
+    ld  hl,(hl)
+    ld  L,(ix+PPU_V+0)
+    ld  a,(ix+PPU_V+1)
+    xor a,h     ;
+    and a,%00000011 ;keep low bits of address in A. H keep is location-specific.
+    xor a,h
+    ld  h,a
+    bit 2,(ix+PPU_CTRL) ;VRAM cursor direction
+    ld  a,1
+    jr  z,+_
+    add a,31
+_:  add a,(ix+PPU_V)
+    ld  (ix+PPU_V),a
+    jr  nc,+_
+    inc (ix+PPU_V+1)
+_:  ld  a,(ix+PPU_DATA) ;following dance simulates delayed buffer read
+    ld  b,(hl)
+    ld  (ix+PPU_DATA),b
     ret
 mapper0_ppu_read_oamdata:
-    ;TODO: Allow reading from OAM
+    ;this needs to be more complex than this. But I'm not. I won't.
+    ;Not now. Not going to play Micro Machines. I don't wanna.
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  L,(ix+PPU_OAMADDR)
+    ld  a,(hl)
     ret
 
 
@@ -702,8 +755,22 @@ mapper0_apu_stop_keyboard:
     xor a,d     ;Merge-in contains b5-7. Is complete.
     ld  (ix+APU_KEYPAD),a
     ret
-_:  ;not even going to try to emulate the second controller.
-    ld  (hl),b
+_:  cp  a,$14   ;OAM DMA
+    jr  nz,+_
+    push bc
+        push de
+            ld  de,513  ;or 514. Not going to emulate put/get cycles
+            add iy,de
+            ld  c,BASETABLE_STRIDE
+            ld  hl,PAGETABLE
+            add hl,bc
+            ld  de,OBJECT_ATTRIB_MEM
+            ld  bc,256
+            ldir
+        pop de
+    pop bc
+    ret
+_:  ld  (hl),b
     ret
 mapper0_ppu_write:
     ret
@@ -726,20 +793,62 @@ mapper0_ppu_write:
 
 
 mapper0_ppu_write_oamdata:
-    ;TODO: Allow writes to OAM data
+    ;Doesn't check anything. So sad.
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  L,(ix+PPU_OAMADDR)
+    ld  (hl),b
     ret
 mapper0_ppu_write_ppuaddr:
-    ;TODO: Allow setting addresses to VRAM
+    rrc (ix+PPU_W)
+    jr  c,+_
+    ld  (ix+PPU_V+0),b
     ret
+_:  ld  (ix+PPU_V+1),b
+    ret
+
 mapper0_ppu_write_ppudata:
-    ;TODO: Allow writes to VRAM.
+    ld  a,(ix+PPU_V+1)
+    ld  c,a
+    and a,%00111111
+    cp  a,$20
+    ret c   ;Mapper 0 does not allow writing to CHR_ROM
+    cp  a,$3F
+    jr  z,+++_    ;write to palette table
+    and a,%00001100     ;%00ZZTTaa Z:00,01=CHR,02=NT,03=PAL; T:WhichNT; a:adrHI
+    ld  hl,nametable00
+    ld  L,a             ;bits already in position to index the table
+    ld  hl,(hl)
+    ld  L,(ix+PPU_V+0)
+    ld  a,(ix+PPU_V+1)
+    xor a,h     ;
+    and a,%00000011 ;keep low bits of address in A. H keep is location-specific.
+    xor a,h
+    ld  h,a
+    ld  (hl),b
+    bit 2,(ix+PPU_CTRL) ;VRAM cursor direction
+    ld  a,1
+    jr  z,+_
+    add a,31
+_:  add a,(ix+PPU_V)
+    ld  (ix+PPU_V),a
+    jr  nc,+_
+    inc (ix+PPU_V+1)
+_:  ret
+_:  ld  hl,vram_palette
+    ld  a,(ix+PPU_V+0)
+    and a,%00111111
+    ld  L,a
+    ld  (hl),b
     ret
+
 mapper0_ppu_write_ppumask:
     ;TODO: Allow queueing for midframe writes.
+    ld  (hl),b
     ret
 mapper0_ppu_write_ppuscroll:
     ;TODO: Allow queueing for midframe writes. Often used in conjunction
     ;with Sprite0 hits for status bar rendering.
+    ld  (hl),b
     ret
 
 
@@ -865,4 +974,6 @@ _:  call getkbd_adl
 #include "core.z80"
 #include "debug.z80"
 #include "ppu.z80"
+#include "palette.z80"
+
 .echo "Main program size: ",$-programStart

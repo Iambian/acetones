@@ -45,7 +45,8 @@ USETABLE_OFFSET     .equ 8
 USETABLE            .equ BASETABLE+USETABLE_OFFSET
 
 NAMETABLE1          .equ BASETABLE+(512*BASETABLE_STRIDE)
-NAMETABLE2          .equ NAMETABLE1 + 1024
+NAMETABLE2          .equ NAMETABLE1 + 1024  ;1024 BYTES
+OBJECT_ATTRIB_MEM   .equ NAMETABLE2 + 1024  ;256 BYTES
 
 ;
 ;saferam1 1024 bytes storage
@@ -106,6 +107,7 @@ INT_CYCLE_OFFSET    .equ 3
 ;
 ;
 ;
+#define WREG_CONST %01010101
 
 ;PPU default locations. Some are not used
 #define PPU_CTRL -32
