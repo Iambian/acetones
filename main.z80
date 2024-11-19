@@ -74,9 +74,8 @@ programStart:
     ld  bc,$002004
     ld  e,$40
     call i6502_map_pages
-    ;Everything should be ready. Set up the debug environment and then
-    ;start the emulation.
-    ;jr $
+    ;Default mappings have been mapped. Let's search for and load a ROM file
+    ;to acquire additional mappings. And maybe load in something that'll run.
     call clearTextBuf
     ld  a,1
     call setLineStart
@@ -105,38 +104,11 @@ _:      ld  a,(hl)
     pop de
     call loadROMFile
 
-    ;REMOVE THE FOLLOWING BLOCK WHEN DONE TESTING NESTEST
-    ;
-    ;
-    ld  hl,timings_file
-    call _Mov9ToOP1
-    call _ChkFindSym
-    jp  c,endCurrentRun
-    call _ChkInRam
-    ex  de,hl
-    jr  nc,+_
-    ld  de,9
-    add hl,de
-    ld  e,(hl)
-    add hl,de
-    inc hl
-_:  ld  e,(hl)
-    inc hl
-    ld  d,(hl)
-    inc hl
-    ld  (timings_base),hl
-    ;
-    ;
-    ;
-
-
     ld  hl,text004
     call printString
 
-    ;jr $
-#ifdef COREDEBUG
-    call dbg_resetScreen
-#endif
+    ;load perf timers
+
     ld  ix,$F20000
     ld  hl,(ix+$30)
     res 0,L ;turn off timer 0
@@ -150,10 +122,14 @@ _:  ld  e,(hl)
     ld  (ix+0),hl
     ld  (ix+3),a
 
+    ;Initialize all (additional) state machines,
+    ;then initialize/start the emulation core
+
     call int6502_init
     call ppu_init
     call i6502Init
 
+    ;Performance timer disable and read.
 
     ld  ix,$F20000
     ld  a,(ix+$30)
@@ -186,11 +162,6 @@ programExit:
     ld  MB,a
     ld  iy,flags
     ret
-
-
-testFilename:
-.db AppVarObj,"NESTEST",0
-
 
 ;NMI, RES, and IRQ. In that order.
 testVectors .equ $-(256-6)
@@ -250,7 +221,8 @@ err_err_quit:
 
 err_noContainersFound:
     call err_err
-.db "Traverse found no candidates.\n",0
+    ;0123456789012345678901234567890123456789
+.db "Traverse found no candidate ROMS.\n",0
 
 err_missingFiles:
     push af
@@ -264,26 +236,27 @@ err_missingFiles_str:
 
 err_tooManyFiles:
     call err_err
-.db "Too many files found.",0
+    ;0123456789012345678901234567890123456789
+.db "Max file count per ROM image exceeded.",0
 
 err_PRGROMTooLarge:
     call err_err
-.db "PRG_ROM too large.",0
+.db "Maximum supported PRG_ROM exceeded.",0
 err_CHRROMTooLarge:
     call err_err
-.db "CHR_ROM too large.",0
+.db "Maximum supported CHR_ROM exceeded.",0
 
 err_missingROMDetected:
     call err_err
-.db "PRG+CHR > Actual file data.",0
+.db "File too small to hold declared PRG+CHR",0
 
 err_ROMHeaderDamaged:
     call err_err
-.db "INES ROM header damaged.",0
+.db "iNES ROM header damaged.",0
 
 err_MapperOutOfRange:
     call err_err
-.db "Mapper specified out of range.",0
+.db "Unsupported mapper detected.",0
 
 err_CHRROMNotFound:
     call err_err
