@@ -21,6 +21,10 @@
 
 programStart:
     di
+    ld  ix,$F00000
+    set 0,(ix+$2C)      ;Enable ON latch
+    ld  (ix+$28),1      ;If latch was set, clear it.
+
     ;Continuous. Else it'd be possible for an NES ROM to tank the CPU
     ;performance by constantly polling the keyboard.
     ld  hl,mpKeyMode
@@ -112,7 +116,7 @@ _:      ld  a,(hl)
     ld  ix,$F20000
     ld  hl,(ix+$30)
     res 0,L ;turn off timer 0
-    res 1,L ;timer 0 uses CPU clock
+    set 1,L ;timer 0 uses 32KHz clock
     res 2,L ;disables timer 0 interrupt generator
     set 1,H ;timer 0 counts upward
     ld  (ix+$30),hl
@@ -141,6 +145,15 @@ _:      ld  a,(hl)
     ld  hl,($F20000)
 
 endCurrentRun:
+    ld  ix,$F00000
+    ld  (ix+$28),1      ;If latch was set, clear it.
+    ld  a,(ix+$20)      ;Check state of latch.
+    and a,%0000001
+    jp  nz,endCurrentRun    ;wait until ON key is released.
+    ld  ix,$F00000
+    res 0,(ix+$2C)      ;Disable ON latch
+
+
     call dbg_prepNextLine
     call newLine
     ld  hl,text005

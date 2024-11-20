@@ -56,7 +56,7 @@ i6502Init:
     call i6502_load_instruction_set
     ;
     ld  ix,core_memory_ix
-    ld  iy,2    ;8 cycle startup. Hooking into inst6502_jsr for init
+    ld  iy,8    ;8 cycle startup. Hooking into inst6502_jsr for init
     lea hl,ix
     lea de,ix+1
     ld  bc,126
@@ -66,26 +66,21 @@ i6502Init:
     ld  hl,0
     add hl,sp
     ld  (ix+CORE_STACK_BASE),hl
-
-    ;Note: SP may need initialization. So does SR for interrupts. Or somesuch.
+    ;
+    ld  (ix+REGSP),$FD  ;init does a BRK-like action without the actual pushes.
+    ld  (ix+REGSR),$24  ;Presumably, this is what status register starts with?
     ld  hl,PAGETABLE+(255*BASETABLE_STRIDE)
     ld  hl,(hl)
     ld  de,$0000FC
     add hl,de
-    ;
-    ;jp inst6502_jsr
-    ;Manual loading below. Uncomment "jp inst6502_jsr" to return to original.
-    ;Settings below is to run nestest CPU-only test. The reset vector above
-    ;requires a working PPU (and probably APU) to be present.
-    ld  (ix+REGSR),$24      ;because that's what the log wants?
-    ld  hl,$C000
-    ld  (ix+REGPC),HL
-    ld  iy,7
-    ld  (ix+REGSP),$FD
-    ;debug stuff
+    ld  hl,(hl) ;get RST vector
+    ld.s (ix+REGPC),hl
+    ;-- debug stuff. Timer things.
     ld  a,($F20030)
     set 0,a ;turn on timer 1
     ld  ($F20030),a
+    ; Core initialized. Begin fetching instructions
+    jr  i6502FirstLoad
 
 i6502RetryFirstLoad:    ;reentrant from ISR handler
     ld.s de,(ix+REGPC)

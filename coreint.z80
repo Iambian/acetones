@@ -3,7 +3,7 @@
 ;
 
 
-
+;This routine is called after the end of every insert/push/pop operation
 int6502_updateIntCounter:
     ld  hl,int_table_len
     ld  a,(hl)
@@ -19,14 +19,14 @@ int6502_updateIntCounter:
     ld  a,(ix+TEMP_MEMORY+2)
     cpl
     ld  (ix+TEMP_MEMORY+2),a
+    ld  hl,(ix+TEMP_MEMORY)
     ld  a,l
     cpl
     ld  l,a
     ld  a,h
     cpl
     ld  h,a
-    ld.s (ix+TEMP_MEMORY),hl
-    ld  hl,(ix+TEMP_MEMORY)
+    inc hl
     ;load to clock counter in "core.z80"
     ld  (i6502_interrupt_timer),hl
     ret
@@ -34,6 +34,28 @@ int6502_updateIntCounter:
 int6502_init:
     xor a,a
     ld  (int_table_len),a
+    ret
+
+
+;Only call this inside the NMI handler, since that is the routine that adjusts
+;the cycle counter downard. All entries that remain on the table will by
+;have a higher count than the NMI. The table's probably empty, though.
+;BC=timeToAdjust IX=thing
+int6502_adjustTimings:
+    ld  ix,INT_TABLE
+    ld  a,(ix-1)
+    or  a,a
+    jr  nz,int6502_adjustTimings_noAdjust
+int6502_adjustTimings_loop:
+    ld  hl,(ix+INT_CYCLE_OFFSET)
+    or  a,a
+    sbc hl,bc
+    ld  (ix+INT_CYCLE_OFFSET),hl
+    lea ix,ix+INT_TABLE_STRIDE
+    dec a
+    jr  nz,int6502_adjustTimings_loop
+int6502_adjustTimings_noAdjust:
+    ld  ix,core_memory_ix
     ret
 
 ;DE=ISRToPush, BC=CallWhenThisClockIsPassed
@@ -45,14 +67,17 @@ int6502_pushISRAfterPop:
     ld  ix,INT_TABLE
     ld  a,(ix-1)        ;length of the table
     or  a,a
-    jr  nz,+_       ;Jump not taken: Push first and only entry
-_:  ld  (ix-1),1
+    jr  nz,int6502_pushISRAfterPop_keepChecking
+int6502_pushISRAfterPop_writeFirstEntry:
+    ld  (ix-1),1
+int6502_pushISRAfterPop_writeEntry:
     ld  (ix+0),de
     ld  (ix+3),bc
     ld  ix,core_memory_ix
-    ret
-_:  dec a
-    jr  z,--_       ;Jump taken: Replace first and only entry since we ate it.
+    jp  int6502_updateIntCounter
+int6502_pushISRAfterPop_keepChecking:
+    dec a
+    jr  z,int6502_pushISRAfterPop_writeFirstEntry
     ;Loop steps:
     ;If not loopCounter or BC < ix[0].T:
     ;   ix[-1] = DE,BC
@@ -64,15 +89,11 @@ _:  dec a
 int6502_pushISRAfterPop_loop:
     lea ix,ix+INT_TABLE_STRIDE
     or  a,a
-    jr  z,+_
+    jr  z,int6502_pushISRAfterPop_writeEntry
     ld  hl,(ix+INT_CYCLE_OFFSET)
     sbc hl,bc   ;C if ix[0]<BC
-    jr  nc,++_
-_:  ld  (ix+INT_ADDR_OFFSET),de
-    ld  (ix+INT_CYCLE_OFFSET),bc
-    ld  ix,core_memory_ix
-    jp  int6502_updateIntCounter
-_:  ld  hl,(ix+INT_ADDR_OFFSET)
+    jr  c,int6502_pushISRAfterPop_writeEntry
+    ld  hl,(ix+INT_ADDR_OFFSET)
     ld  (ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE),hl
     ld  hl,(ix+INT_CYCLE_OFFSET)
     ld  (ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE),hl
@@ -85,13 +106,8 @@ int6502_insertISA:
     ld  ix,INT_TABLE
     ld  a,(ix-1)
     or  a,a
-    jr  nz,+_
-    ld  (ix-1),1
-    ld  (ix+0),de
-    ld  (ix+3),bc
-    ld  ix,core_memory_ix
-    jp  int6502_updateIntCounter
-_:  cp  a,INT_TABLE_MAXLEN
+    jr  z,int6502_pushISRAfterPop_writeFirstEntry
+    cp  a,INT_TABLE_MAXLEN
     ret z       ;do not attempt to insert if table is maxed out
     push bc
         ld  b,a
@@ -106,15 +122,11 @@ _:  cp  a,INT_TABLE_MAXLEN
     ;   ix[0] = ix[-1], ix-=STRIDE, loopCtr--
 int6502_insertISA_Loop:
     or  a,a
-    jr  z,+_
+    jr  z,int6502_pushISRAfterPop_writeFirstEntry
     ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
     sbc hl,bc   ;C if ix[-1]<BC
-    jr  c,++_
-_:  ld  (ix+INT_ADDR_OFFSET),de
-    ld  (ix+INT_CYCLE_OFFSET),bc
-    ld  ix,core_memory_ix
-    jp  int6502_updateIntCounter
-_:  ld  hl,(ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE)
+    jr  nc,int6502_pushISRAfterPop_writeFirstEntry
+    ld  hl,(ix+INT_ADDR_OFFSET-INT_TABLE_STRIDE)
     ld  (ix+INT_ADDR_OFFSET),hl
     ld  hl,(ix+INT_CYCLE_OFFSET-INT_TABLE_STRIDE)
     ld  (ix+INT_CYCLE_OFFSET),hl
@@ -143,7 +155,7 @@ int6502_removeTop:
     ld  c,INT_TABLE_STRIDE-1
     ldir
 _:  ld ix,core_memory_ix
-    ret    
+    jp int6502_updateIntCounter
 
 
 

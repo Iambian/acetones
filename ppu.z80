@@ -169,6 +169,10 @@ ppu_init:
 
 ;Some bits of this is in "coreint.z80"
 ppu_isr:
+    ld  a,($F00020)
+    and a,%0000001
+    jp  nz,endCurrentRun    ;stop execution when ON key is pressed
+
     ld  a,(ix+PPU_CTRL)
     and a,%00011000     ;sprite and background. if zero, no rendering happens.
     jr  z,ppu_isr_nodraw
@@ -180,9 +184,12 @@ ppu_isr:
     dec (ix+PPU_SUBCYCLE)
 _:  ;there... should be something else to do?
     ;call ppu_drawBGSprites
-    call ppu_drawBG
+    push iy
+        call ppu_drawBG
+    pop iy
     ;call ppu_drawFGSprites
 ppu_isr_nodraw:
+    inc (ix+PPU_FRAMECOUNT)
     ld  bc,27939
     ld  a,(ix+PPU_SUBCYCLE)
     add a,2     ;add the 2/3rds cycle
@@ -191,7 +198,13 @@ ppu_isr_nodraw:
     sub a,3
     inc bc
 _:  ld  (ix+PPU_SUBCYCLE),a
+    lea hl,iy+0
+    or  a,a
+    sbc hl,bc
+    push hl
+    pop iy
     ld  de,ppu_isr
+    call int6502_adjustTimings
     call int6502_pushISRAfterPop
     set 7,(ix+PPU_STATUS)
     ld  hl,(ppu_smc_gate)
@@ -213,6 +226,80 @@ _:  ld  (ix+PPU_SUBCYCLE),a
 
 
 ppu_drawBG:
+
+;backdrop color. Do not render the following if there are no
+;sprites to hide in the background.
+    ld  hl,(curScreenBuf)
+    ld  bc,320*240
+    add hl,bc
+    ld  (++_+1),sp
+    ld  sp,hl
+    ld  b,0
+    ld  de,0
+_:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    djnz -_
+_:  ld  sp,0
+;The following is a framecounter. Mask out if needed.
+    ld  hl,1
+    ld  (xPos),hl   
+    ld  a,(ix+PPU_FRAMECOUNT)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    xor a,a
+    sbc hl,hl
+    ld  de,($F20000)
+    ld  a,d
+    or  a,a     ;Framerate too large to bother calculating. Or far too small.
+    jr  z,ppu_noframerate
+    ld  ($F20000),hl
+    ld  hl,32768
+    xor a,a
+_:  inc a
+    sbc hl,de
+    jr  nc,-_
+    dec a
+    or  a,a ;clears necessary flags
+    daa
+    push de
+        call printSmallNumPair
+        ld  a,'.'
+        call printBigFont
+    pop de
+    xor a,a
+    ld  e,d
+    ld  d,a
+    ld  hl,32768/256*100
+_:  inc a
+    sbc hl,de
+    jr  nc,-_
+    dec a
+    or  a,a ;clears necessary flags
+    daa
+    call printSmallNumPair
+ppu_noframerate:
+    ret
+
+    
+    
+
+
+
+
+
+
+
+
+
     ;set base rom addresses
     ld  hl,(chr_rom_base)
     ld  bc,$001000
