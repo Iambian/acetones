@@ -53,7 +53,7 @@ stopGfx:
 
 startGfx:
     call _boot_ClearVRAM
-    ld  de,lcdWatermark+lcdIntFront+lcdPwr+lcdBgr+lcdBpp8
+    ld  de,lcdWatermark+lcdIntFront+lcdPwr+lcdBpp8 ;+lcdBgr
     ld  bc,screenBuf1
 configureScreen:
     ld  hl,mpLcdBase

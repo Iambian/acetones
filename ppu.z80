@@ -175,7 +175,7 @@ ppu_isr:
 
     ld  a,(ix+PPU_CTRL)
     and a,%00011000     ;sprite and background. if zero, no rendering happens.
-    jr  z,ppu_isr_nodraw
+    ;jr  z,ppu_isr_nodraw
     ;perform the check that makes odd cycles one ppu cc shorter, but only if
     ;something is being rendered to the screen
     ld  a,(ix+PPU_FRAMECOUNT)
@@ -185,7 +185,7 @@ ppu_isr:
 _:  ;there... should be something else to do?
     ;call ppu_drawBGSprites
     push iy
-        call ppu_drawBG
+        call ppu_drawFrame
     pop iy
     ;call ppu_drawFGSprites
 ppu_isr_nodraw:
@@ -225,7 +225,7 @@ _:  ld  (ix+PPU_SUBCYCLE),a
 
 
 
-ppu_drawBG:
+ppu_drawFrame:
 
 ;backdrop color. Do not render the following if there are no
 ;sprites to hide in the background.
@@ -287,6 +287,7 @@ _:  inc a
     daa
     call printSmallNumPair
 ppu_noframerate:
+    call fastCopy
     ret
 
     

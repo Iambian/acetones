@@ -179,7 +179,7 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
     push hl
         lea hl,iy
 i6502_interrupt_timer   .equ $+1
-        ld  bc,-26548
+        ld  bc,-27939
         add hl,bc
         jr  c,i6502_take_interrupt
 i6502_continue_instruction_fetch:
@@ -202,6 +202,8 @@ i6502_no_interrupts:
         jp  i6502_continue_instruction_fetch
 
 i6502_take_interrupt:
+        add hl,hl   ;Check sign bit. Keep going if neg result. Fit inside timer
+        jp  c,i6502_continue_instruction_fetch
         ld  h,a
         ld  a,(int_table_len)
         or  a,a

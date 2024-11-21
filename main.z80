@@ -145,15 +145,6 @@ _:      ld  a,(hl)
     ld  hl,($F20000)
 
 endCurrentRun:
-    ld  ix,$F00000
-    ld  (ix+$28),1      ;If latch was set, clear it.
-    ld  a,(ix+$20)      ;Check state of latch.
-    and a,%0000001
-    jp  nz,endCurrentRun    ;wait until ON key is released.
-    ld  ix,$F00000
-    res 0,(ix+$2C)      ;Disable ON latch
-
-
     call dbg_prepNextLine
     call newLine
     ld  hl,text005
@@ -161,9 +152,19 @@ endCurrentRun:
 
     ;call printTextBuf
     call fastCopy
-    nop
-    call waituntilnewkeypress
-    call waituntilkeyrelease
+
+_:  ld  ix,$F00000
+    ld  (ix+$28),1      ;If latch was set, clear it.
+    ld  a,(ix+$20)      ;Check state of latch.
+    and a,%00000001
+    jp  nz,-_           ;wait until ON key is released.
+    ld  ix,$F00000
+    res 0,(ix+$2C)      ;Disable ON latch
+    ld  (ix+$28),1      ;If latch was set, clear it.
+
+;    nop
+;    call waituntilnewkeypress
+;    call waituntilkeyrelease
 
     ;
     ;
