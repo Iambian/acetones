@@ -177,6 +177,16 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
     pop af
 #endif
     push hl
+        push af
+            ;ld  a,(ix+PPU_FRAMECOUNT)
+            ;or  a,a
+            ;cp  a,$20
+            ;jr  c,+_
+            ;ld  bc,-25000
+            ;lea hl,iy
+            ;add hl,bc
+            ;jr  c,$
+_:      pop af
         lea hl,iy
 i6502_interrupt_timer   .equ $+1
         ld  bc,-27939
@@ -420,6 +430,55 @@ subroutine6502_take_branch:
 _:  ld.s (ix+REGPC),hl
     jp  i6502FirstLoad
 
+subroutine6502_take_branch_waitloop_detect:
+    ld  a,(hl)      ;offset byte
+    ld  c,a         ;keep that offset byte for now. We'll need it later.
+    ld  l,a
+    add a,a
+    sbc a,a
+    ld  h,a         ;sign-extend into HL
+    ld  d,(ix+REGPC+1)
+    inc de
+    add hl,de           ;HLU unimportant for any further checks
+    ld.s (ix+REGPC),hl  ;since we aren't going to store it anyway
+    ld  e,h             ;D=newMSB, E=oldMSB
+    ;Now we have to check the instruction we landed on to see 
+    ld  a,c             ;Check offset byte if in range for waitloop things
+    cp  a,-2-2          ;-2 to reach back to itself, and -2 for the inst before
+    jr  z,subroutine6502_tbwd_2bcheck
+    ;insert other offset-based checks here
+subroutine6502_tbwd_check_failed:
+    ADDCYC(1)
+    ld  a,e
+    cp  a,d     ;Check if high byte changed. If so, it's a page crossing.
+    jr  z,+_
+    ADDCYC(1)
+_:  jp  i6502FirstLoad
+;Note: By the time we're checking for waitloop status, the jump's already
+;been recorded for next execution. Thus, when the next interrupt occurs,
+;that instruction will be retried and the loop will fall through, preventing
+;the sort of lockup that would've needed additional flags to handle.
+subroutine6502_tbwd_2bcheck:
+    lea iy,iy-2     ;undo the first addcyc
+    ld  a,L         ;preserve LSB for later thingies.
+    ld  b,h
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,a
+    add hl,bc       ;Address to prior instruction reconstructed.
+    ld  a,(hl)
+    cp  a,$C5       ;CMP_ZP, seen in Nestest
+    jr  z,subroutine6502_tbwd_waitloop
+    jr  subroutine6502_tbwd_check_failed
+
+subroutine6502_tbwd_waitloop:
+;I don't particularly care about timing consistency here. 3 or more ccs per
+;iteration, I'll fix that later if it ever truly becomes a problem.
+    jp  inst6052_jmp_abs_inf_loop   
 
 ;-----------------------------------------------------------------------------
 
@@ -2439,10 +2498,8 @@ inst6502_cmp_imm:
 ;zeropage	CMP oper	C5	2	3  
 inst6502_cmp_zp:
     ADDCYC(3)
-    ld  a,(hl)
     ld  bc,ZEROPAGE
-    add a,c
-    ld  c,a
+    ld  c,(hl)
     ld  a,(bc)
     ld  b,a
     jp  subroutine6502_cmp_combined_end
@@ -2570,10 +2627,8 @@ inst6502_cpx_imm:
 ;zeropage	CPX oper	E4	2	3  
 inst6502_cpx_zp:
     ADDCYC(3)
-    ld  a,(hl)
     ld  bc,ZEROPAGE
-    add a,c
-    ld  c,a
+    ld  c,(hl)
     ld  a,(bc)
     ld  b,a
     ld  a,(ix+REGX)
@@ -2687,7 +2742,7 @@ inst6502_beq:
     ADDCYC(2)
     bit SF_ZERO,(ix+REGSR)
     jp  z,i6502NextLoad
-    jp  subroutine6502_take_branch
+    jp  subroutine6502_take_branch_waitloop_detect
 
 ;branch on N=1
 ;relative	BMI oper	30	2	2**
@@ -2808,22 +2863,55 @@ inst6502_rti:
 
 ;absolute	JMP oper	4C	3	3  
 inst6052_jmp_abs:
+    ;The waitloop handler requires that the ADDCYC() is NOT done until
+    ;after the jump to do the wait happens. This is because it's possible
+    ;that an IRQ/NMI may be skipped if ADDCYC() is done first.
+    ld  d,(ix+REGPC+1)
     ld  a,(hl)
     inc hl
     inc e
     jr  nz,+_
-    ld  d,(ix+REGPC+1)
     inc d
-    ld  e,BASETABLE_STRIDE
-    mlt de
+    ld  c,d
+    ld  b,BASETABLE_STRIDE
+    mlt bc
     ld  hl,PAGETABLE
-    add hl,de
+    add hl,bc
     ld  hl,(hl)
-_:  ld  (ix+REGPC+0),a
-    ld  a,(hl)
-    ld  (ix+REGPC+1),a
+_:  ld  h,(hl)
+    ld  l,a     ;HL=newaddr
+    dec de
+    dec de      ;DE=oldaddr, at start of instruction
+    ex.s de,hl  ;HL=oldaddr, DE=newaddr. Upper bytes cleared.
+    or  a,a
+    sbc hl,de   ;infinite loop detection
+    ld.s (ix+REGPC),de
+    jr  z,inst6052_jmp_abs_inf_loop
     ADDCYC(3)
     jp i6502FirstLoad
+
+inst6052_jmp_abs_inf_loop:
+    lea bc,iy+0
+    ld  hl,(i6502_interrupt_timer)
+    ld  (ix+TEMP_MEMORY),hl
+    ld  a,(ix+TEMP_MEMORY+2)
+    cpl
+    ld  (ix+TEMP_MEMORY+2),a
+    ld  hl,(ix+TEMP_MEMORY)
+    ld  a,l
+    cpl
+    ld  l,a
+    ld  a,h
+    cpl
+    ld  h,a
+    inc hl
+    push hl
+    pop iy      ;screw accurate timing. I just want it to go brrt
+    ;TODO: Accurate timing is probably a necessary thing. Maybe do proper
+    ;math to figure this one out.
+    jp  i6502FirstLoad  
+    
+
 
 
 ;Note: In earlier 6502 implementations, cross-page reads on indirect is bugged.

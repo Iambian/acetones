@@ -35,6 +35,17 @@ programStart:
     ld  a,$D0
     ld  MB,a
     call startGfx
+
+
+
+
+
+
+
+
+
+
+
     ;
     ; todo; write test 6502 program, map it into rom.
     ; map virtual screen device into ram too. 32x30 screen ascii display
@@ -596,9 +607,9 @@ mapper0_apu_read:
     ld  a,c
     cp  a,$16
     jr  nz,+_
-    xor a,a
-    srl (ix+APU_KEYPAD)
-    adc a,a                 ;TODO: Open bus behavior on bits 5-7
+    scf
+    rr  (ix+APU_KEYPAD)     ;after bits are exhausted, should read '1'
+    adc a,$40               ;Simulate open bus behavior
     ret
 _:  ld  a,(hl)  ;hope that the dummy map page is good enough to not crash.
     ret
@@ -702,7 +713,7 @@ mapper0_apu_write:
     bit 0,b     ;So... what are we changing it to?
     ld  (ix+APU_KEYLATCH),b
     ld  hl,mpKeyMode
-    jr  z,mapper0_apu_stop_keyboard
+    jr  z,mapper0_apu_stop_keyboard ;jump to strobe stop
     ld  a,(hl)
     cp  a,3
     ret z       ;don't do anything to the keyboard if running continuous.

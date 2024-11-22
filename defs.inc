@@ -14,7 +14,7 @@ DEBUG_STEP_START_CYCLE  .equ 30000 ;26485
 
 
 
-FONTFGCOLOR .EQU $29
+FONTFGCOLOR .EQU $FF ;$29
 FONTBGCOLOR .EQU $00
 
 screenBuf1      .equ vRam
@@ -110,6 +110,7 @@ INT_CYCLE_OFFSET    .equ 3
 #define WREG_CONST %01010101
 
 ;PPU default locations. Some are not used
+#define DEBUGCONTROL ($40-$80)
 #define PPU_CTRL -32
 #define PPU_MASK -31
 #define PPU_STATUS -30
@@ -147,6 +148,7 @@ INT_CYCLE_OFFSET    .equ 3
 #define PORT_WRITE_TIMESTAMP 24
 #define TEMP_MEMORY 27
 #define NMI_TRIGGERED 30 
+#define PREV_INSTR 31
 ;flag IDs
 #define SF_NEG 7
 #define SF_OVER 6 
