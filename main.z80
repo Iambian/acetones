@@ -144,6 +144,29 @@ _:      ld  a,(hl)
     call ppu_init
     call i6502Init
 
+    ;===========================================================================
+    ;===========================================================================
+    ;===========================================================================
+    ; TODO: This is where you'll insert code to test the PPU by manually
+    ; manipulating memory and registers, then calling its render function.
+    ; All mappings have been set up by the mappers. All you got to do is
+    ; use them. For initialization purposes, note these addresses:
+    ;
+    ; NAMETABLE1, NAMETABLE2, OBJECT_ATTRIB_MEM, vram_palette
+    ;
+    ; Configure the PPU registers. Notably:
+    ;
+    ; IX+PPU_CTRL, IX+PPU_MASK, IX+PPU_SCROLL
+    ;
+    ; After all these, you'll want to come up with a way to deal with drawlists
+    ; so games can alter PPU_SCROLL mid-frame. Sprite 0 hits is the popular
+    ; way to do that, so take note of when that happens.
+    ;
+    ;===========================================================================
+    ;===========================================================================
+    ;===========================================================================
+
+
     ;Performance timer disable and read.
 
     ld  ix,$F20000
@@ -156,8 +179,8 @@ _:      ld  a,(hl)
     ld  hl,($F20000)
 
 endCurrentRun:
-    call dbg_prepNextLine
-    call newLine
+    ;call dbg_prepNextLine
+    ;call newLine
     ld  hl,text005
     call printString
 
@@ -174,8 +197,8 @@ _:  ld  ix,$F00000
     ld  (ix+$28),1      ;If latch was set, clear it.
 
 ;    nop
-;    call waituntilnewkeypress
-;    call waituntilkeyrelease
+    call waituntilnewkeypress
+    call waituntilkeyrelease
 
     ;
     ;
@@ -217,7 +240,7 @@ timings_file:
 .db AppVarObj,"timings",0
 
 text001:
-.db "Looking up nestest...\n",0
+.db "Looking up nearest ROM file...\n",0
 text003:
 .db "File found: ",0
 text004:
