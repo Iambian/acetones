@@ -165,18 +165,27 @@ _:      ld  a,(hl)
     ;===========================================================================
     ;===========================================================================
     ;===========================================================================
+    ;nametable fill
     ld  hl,NAMETABLE1
     push hl \ pop de
     inc de
     ld  bc,(32*30)-1
-    ld  (hl),'A'
+    ld  (hl),'_'
     ldir
+    ld  hl,NAMETABLE2
+    push hl \ pop de
+    inc de
+    ld  bc,(32*30)-1
+    ld  (hl),'*'
+    ldir
+    ;hide all sprites
     ld  hl,OBJECT_ATTRIB_MEM
     push hl \ pop de
     inc de
     ld  bc,255
     ld  (hl),$FF
     ldir
+    ;nametable 1 box pattern on displayable area (omit top and bottom 8 pixels)
     ld  hl,NAMETABLE1
     push hl \ pop de
     inc de
@@ -203,6 +212,41 @@ _:  ld  (hl),'i'
     ld  (hl),'l'
     inc hl
     djnz -_
+    ;clear attribute memory
+    ld  hl,NAMETABLE1+960
+    ld  de,NAMETABLE1+961
+    ld  bc,63
+    ld  (hl),0
+    ldir
+    ld  hl,NAMETABLE2+960
+    ld  de,NAMETABLE2+961
+    ld  bc,63
+    ld  (hl),0
+    ldir
+
+
+
+    jr ++_
+_:  
+.db $0E,$30,$30,$30 ;bg0
+.db $0E,$30,$30,$30 ;bg1
+.db $0E,$30,$30,$30 ;bg2
+.db $0E,$30,$30,$30 ;bg4
+.db $0E,$30,$30,$30 ;sp0
+.db $0E,$30,$30,$30 ;sp1
+.db $0E,$30,$30,$30 ;sp2
+.db $0E,$30,$30,$30 ;sp3
+
+
+_:  nop
+    ;load palette RAM
+    ld  hl,--_
+    ld  de,vram_palette
+    ld  bc,32
+    ldir
+
+
+    ;set registers
     ld  (ix+PPU_XSCROLL),0      ;PPU_SCROLL is write-only. Data gets...
     ld  (ix+PPU_YSCROLL),0      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
@@ -706,7 +750,16 @@ mapper0_ppu_read_ppustatus:
     ;reading ppustatus does additional things.
     ld  a,WREG_CONST
     ld  (ix+PPU_W),a
-    jr -_
+    lea hl,ix+PPU_STATUS
+    ld  a,(hl)
+    res 7,(hl)  ;clears VBlank flag if it was set. But only after read.
+    ;!!! NOTE:
+    ; In the future, sprite 0 hit flag is set in a generated "interrupt" event
+    ; created by another "interrupt" event that the PPU ISR generates. The PPU
+    ; event triggers at the end VBlank, clearing the sprite 0 flag and creating
+    ; the sprite 0 hit event flag, where it is set. But only if sprite 0 can
+    ; be hit.
+    ret
 mapper0_ppu_read_ppudata:
     ld  a,(ix+PPU_V+1)
     ld  c,a

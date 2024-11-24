@@ -26,7 +26,7 @@ slopPos             .equ $D031F8        ;extra byte here
 debugram            .equ $D031F9        ;FA and FB occupied too.
 save_spl            .equ $D031FC        ;FD and FE occupied too.
 save_mbase          .equ $D031FF        ;
-vram_palette        .equ $D03200        ;64 bytes of color. It looks like itself
+vram_palette        .equ $D03200        ;32 bytes. PPU palette RAM (bg, spr)
 core_memory_ix      .equ $D03280        ;IX range -128 to -64 already in use.
 scrap_mapping       .equ $D03300        ;256 bytes. maps to nowhere important.
 saferam1            .equ $D03400        ;1024 bytes available. Define later.

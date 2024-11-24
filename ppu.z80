@@ -2,6 +2,10 @@
 ;this file. Some of it will necessarily be located with the mapper code
 ;that handles PPU I/O.
 
+; NOTES ON SPRITE 0 HIT IS LOCATED IN MAIN.Z80, AROUND THE CODE WHERE
+; MAPPER 0 READ HANDLER HANDLES READING PPU_STATUS.
+
+
 
     ;Do this before a lot of other things.
     ;Select current character rom banks from PPU settings.
@@ -139,24 +143,25 @@ _:  and a,%00001100
 
 ;
 ppu_init:
-    ;
+    ; Reset palette RAM, PPU, and APU registers
     ld  ix,core_memory_ix
     lea hl,ix-128
     lea de,ix-127
     ld  bc,126
     ld  (hl),$00
     ldir
-    ;
+    ; Bit pattern used in detecting even-odd frames
     ld  a,WREG_CONST
     ld  (ix+PPU_W),a
-    ;
+    ; Copies converted 64 colors to hardware LCD palette RAM.
+    ; The data is from https://www.nesdev.org/wiki/PPU_palettes
+    ; The destination is the Primecell PL111 LCD controller, documented here:
+    ; https://wikiti.brandonw.net/index.php?title=84PCE:Ports:4000
     ld  de,mpLcdPalette
     ld  hl,paletteData
     ld  bc,64*2
     ldir
-    ;
-
-
+    ; Sets up the core's interrupt subsystem
     xor a,a
     ld  (int_table_len),a
     ld  de,ppu_isr
