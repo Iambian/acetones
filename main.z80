@@ -165,6 +165,55 @@ _:      ld  a,(hl)
     ;===========================================================================
     ;===========================================================================
     ;===========================================================================
+    ld  hl,NAMETABLE1
+    push hl \ pop de
+    inc de
+    ld  bc,(32*30)-1
+    ld  (hl),'A'
+    ldir
+    ld  hl,OBJECT_ATTRIB_MEM
+    push hl \ pop de
+    inc de
+    ld  bc,255
+    ld  (hl),$FF
+    ldir
+    ld  hl,NAMETABLE1
+    push hl \ pop de
+    inc de
+    ld  bc,(32*30)-1
+    ld  (hl),'Z'
+    ldir
+    ld  hl,NAMETABLE1+32
+    push hl \ pop de
+    inc de
+    ld  bc,31
+    ld  (hl),'w'
+    ldir
+    ld  hl,NAMETABLE1+(32*29)
+    push hl \ pop de
+    inc de
+    ld  bc,31
+    ld  (hl),'w'
+    ldir
+    ld  hl,NAMETABLE1+64
+    ld  b,26
+    ld  de,31
+_:  ld  (hl),'i'
+    add hl,de
+    ld  (hl),'l'
+    inc hl
+    djnz -_
+    ld  (ix+PPU_XSCROLL),0      ;PPU_SCROLL is write-only. Data gets...
+    ld  (ix+PPU_YSCROLL),0      ;... deposited into these two registers.
+    ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
+    ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
+
+    call ppu_drawFrame
+
+    call fastCopy
+
+    call waituntilnewkeypress
+    call waituntilkeyrelease
 
 
     ;Performance timer disable and read.
