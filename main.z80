@@ -36,10 +36,83 @@ programStart:
     ld  MB,a
     call startGfx
 
+    ld  hl,vRam
+    ld  (mpLcdBase),hl
+    ld  de,vRam+1
+    ld  bc,320*240-1
+    ld  (hl),0
+    ldir
+    call waituntilnewkeypress
+    call waituntilkeyrelease
 
 
+    ;Set primecell window parameters, then set sitronix window params.
+    ;In that order.
+    ld  hl,$0A0300|(13<<2)   ;6b:(PIX/16)-1. Default 14 (240). Need 224 -> 13.
+    ld  (mpLcdTiming0),hl
+    ld  hl,$020800|(255)     ;10b:PIX. Default 319 (230). Need 256 -> 255
+    ld  (mpLcdTiming1),hl
+    ;Column address set
+    ld  a,$2A
+    call spiCmd
+    ld  a,$00   \ call spiParam \ ld  a,$20 \ call spiParam ;hi, then lo bytes
+    ld  a,$01   \ call spiParam \ ld  a,$1F \ call spiParam ;hi, then lo bytes
+    ;Row address set
+    ld  a,$2B
+    call spiCmd
+    ld  a,$00   \ call spiParam \ ld  a,$08 \ call spiParam ;hi, then lo bytes
+    ld  a,$00   \ call spiParam \ ld  a,$E7 \ call spiParam ;hi, then lo bytes
+    ld  hl,vRam
+    ld  (mpLcdBase),hl
+    ld  hl,$0000
+    ;Write data into vRam. Draw a simple box.
+    ld  hl,vRam
+    ld  de,vRam+1
+    ld  bc,256*224-1
+    ld  (hl),$E8        ;red box. Rose?
+    ldir
+    ld  hl,vRam
+    ld  de,vRam+1
+    ld  bc,255
+    ld  (hl),$57
+    ldir                ;top side. blue
+    ld  hl,vRam+(256*223)
+    ld  de,vRam+(256*223)+1
+    ld  bc,255
+    ld  (hl),$57
+    ldir                ;bottom side. blue
+    ld  hl,vRam+256
+    ld  de,255
+    ld  b,224-2
+_:  ld  (hl),$25        ;green left/right sides
+    add hl,de
+    ld  (hl),$25
+    inc hl
+    djnz -_
+
+    call waituntilnewkeypress
+    call waituntilkeyrelease
 
 
+    ;Restore defaults. First set sitronix window params, then primecell params.
+
+    ld  hl,$0A0338
+    ld  (mpLcdTiming0),hl
+    ld  hl,$02093F
+    ld  (mpLcdTiming1),hl
+    ;Column address set
+    ld  a,$2A
+    call spiCmd
+    ld  a,$00   \ call spiParam \ ld  a,$00 \ call spiParam ;hi, then lo bytes
+    ld  a,$01   \ call spiParam \ ld  a,$3F \ call spiParam ;hi, then lo bytes
+    ;Row address set
+    ld  a,$2B
+    call spiCmd
+    ld  a,$00   \ call spiParam \ ld  a,$00 \ call spiParam ;hi, then lo bytes
+    ld  a,$00   \ call spiParam \ ld  a,$EF \ call spiParam ;hi, then lo bytes
+
+
+    jp endCurrentRun
 
 
 

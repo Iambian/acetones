@@ -312,7 +312,51 @@ calculateScreenPtrDE:
 
 
 
+;Example code, also ripped from the page below.
+; ld a,036h ; Flips the lcd horizontally, vertically, and swaps the b and r components
+; call spiCmd
+; ld a,0C0h
+; call spiParam
+;
+; ld a,002h ; Resetting the lcd on exit
+; call spiCmd
+; jp boot_InitializeHardware
 
+;Copied shamelessly from:
+;https://wikiti.brandonw.net/index.php?title=84PCE:Ports:D000
+; Input: A = parameter
+spiParam:
+ scf ; First bit is set for data
+ .db 030h ; jr nc,? ; skips over one byte
+; Input: A = command
+spiCmd:
+ or a,a ; First bit is clear for commands
+ ld hl,0F80818h
+ call spiWrite
+ ld l,h
+ ld (hl),001h
+spiWait:
+ ld l,00Dh
+spiWait1:
+ ld a,(hl)
+ and a,0F0h
+ jr nz,spiWait1
+ dec l
+spiWait2:
+ bit 2,(hl)
+ jr nz,spiWait2
+ ld l,h
+ ld (hl),a
+ ret
+spiWrite:
+ ld b,3
+spiWriteLoop:
+ rla
+ rla
+ rla
+ ld (hl),a ; send 3 bits
+ djnz spiWriteLoop
+ ret
 
 
 
