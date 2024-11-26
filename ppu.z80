@@ -131,6 +131,168 @@ _:  and a,%00001100
     ; Do in the inlining thing later.
     ;
 
+
+;Some test code for things I may integrate later. They use a different
+;display paradigm than the code in the actual stuff. For now.
+;Just gotta jot my thoughts down.
+
+
+
+    ; Chunks of the block below will be everywhere. But we need to pump the
+    ; first itration with a known value so that further pointer increments
+    ; will... well. yanno. Let's just copy that bit off the already-completed
+    ; stuff in the actual stuff.
+    ; Speaking of actual stuff, I need to modify it to work with a 256-wide
+    ; screen buffer simply to test if the logic behind all these weird
+    ; memory accesses is correct. Gosh darn it. I keep delaying that test >.>
+
+    ;Let's assume that SP is corretly set.
+    ;Retrieve attribute byte from nametable, using BC to preserve DE
+    ld  c,e
+    ld  b,d
+    ld  a,d
+    rra
+    srl e
+    rra
+    srl e       ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rlca
+    rlca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  e,c
+    ld  d,b
+    ;Selects attribute from A bitpacked DE = %------yy yYyxxxXx y: e6, x: e1
+    ;into the format %0000AA00
+    bit 6,e
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,e
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+    ld  (ix+TEMP_MEMORY+2),a
+    ld  bc,(ix+TEMP_MEMORY)
+    ld  b,a
+    ld  c,a
+
+
+
+
+
+
+
+
+    ;Probably don't need this code since buffer pointer is either already
+    ;set from Y-scroll first iteration, or set to exactly screenbuf.
+    ld  b,(ix+PPU_VCOUNT)
+    ld  c,8
+    mlt bc
+    ld  c,(ix+PPU_HCOUNT)
+    ld  hl,$000000  ;Pointer to current VRAM buffer.
+    add hl,bc
+    ld  bc,(256*8)+8
+    add hl,bc
+    ld  sp,hl
+
+
+
+
+
+
+
+
+ppu_midVertLoop:
+
+
+
+ppu_midHorizLoop:
+
+
+
+
+    ld  a,(de)      ;DE=nametable pointer
+    ld  c,a
+    ld  b,64        ;sprites are 64 bytes wide
+    mlt bc
+    ld  iy,$000000  ;FILL IN LATER TO POINTER TO BG TILE CACHE/BUFFER
+    add iy,bc
+    ;
+    ;
+    ;
+    ;r7 21 bytes per segement. 
+    ld  hl,(iy+64- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r6
+    ld  hl,(iy+56- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r5
+    ld  hl,(iy+48- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r4
+    ld  hl,(iy+40- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r3
+    ld  hl,(iy+32- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r2
+    ld  hl,(iy+24- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r1
+    ld  hl,(iy+16- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r0
+    ld  hl,(iy+ 8- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;320 cycles per tile. Not as good as I first thought.
+    ld  hl,(256*8)+8
+    add hl,sp
+    ld  sp,hl
+    dec (ix+PPU_HCOUNT)
+    jp  nz,ppu_midHorizLoop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ;    ***   *** ***** *   *  ***  *          *** ***** *   * ***** *****
 ;   *   * *      *   *   * *   * *         *      *   *   * *     *    
