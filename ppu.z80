@@ -1,0 +1,660 @@
+;PPU-related stuff is written here, though not all of it is localized in
+;this file. Some of it will necessarily be located with the mapper code
+;that handles PPU I/O.
+
+; NOTES ON SPRITE 0 HIT IS LOCATED IN MAIN.Z80, AROUND THE CODE WHERE
+; MAPPER 0 READ HANDLER HANDLES READING PPU_STATUS.
+
+
+
+    ;Do this before a lot of other things.
+    ;Select current character rom banks from PPU settings.
+    ld  hl,(chr_rom_base)
+    ld  bc,$001000
+    ld  a,(ix+PPU_CTRL)
+    push hl
+        bit 4,a     ;background pattern base offset
+        jr  z,+_
+        add hl,bc
+_:      ld  (chr_rom_tiles),hl
+    pop hl
+    bit 5,a     ;sprite pattern base offset
+    jr  z,+_
+    add hl,bc
+_:  ld  (chr_rom_sprites),hl
+
+
+
+    ;B=Y, C=X. Obtain nametable address
+    ;You must preserve BC yourself. Somehow. Or not depending on how you loop.
+    ;B and C are modified to fit inside the nametable selected.
+    ld  hl,nametable00>>3
+    ld  a,b
+    sub 32
+    jr  c,+_
+    ld  a,b
+_:  ld  b,a
+    ccf
+    adc hl,hl
+    ld  a,c
+    sub 30
+    jr  c,+_
+    ld  a,c
+_:  ld  c,a
+    ccf
+    adc hl,hl
+    add hl,hl   ;HL is now a pointer. do ld hl,(hl) to get actual NT address.
+
+
+    ;Increment C=X, adjusting nametable pointer table in HL if crossover
+    inc c
+    ld  a,c
+    cp  a,32
+    jr  c,+_
+    ld  c,0
+    ld  a,L
+    xor a,%00000100
+    ld  L,a
+_:  nop
+
+    ;Increment B=Y, adjusting nametable pointer table in HL if crossover
+    inc b
+    ld  a,b
+    cp  a,30
+    jr  c,+_
+    ld  b,0
+    ld  a,L
+    xor a,%00001000
+    ld  L,a
+_:  nop
+
+    ;Retrieves attribute byte from B=Y, C=X
+    ;HL=nametable pointer table
+    ;NTptr tab low byte fmt: %000TIIAA. T=attrib, I=ID, A=address bytes
+    push de
+        ld  a,c
+        srl a
+        srl a   ;change 0-30 to 0-7. Discards low 2 bits.
+        ld  e,a
+        ld  a,b
+        and a,3 ;discard two lower bits
+        add a,a ;But place remaining bits up higher
+        add a,e ;A=%00YYYXXX
+        set 4,L ;swap to attrib
+        ld  de,(hl)
+        res 4,L ;swap back to main nametable pointers
+        add a,e ;base is $C0. This will not produce a carry.
+        ld  e,a
+        ld  a,(de)
+    pop de
+
+    ;Selects attribute from A from B=Y, C=X in format %0000AA00
+    bit 1,b
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,c
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+
+    ;Nametable/tilemap variant
+    ;Sets DE to current location in nametable wrt B=Y, C=X
+    ;HL=current nametable pointer
+    push hl
+        ld  hl,(hl)
+        ld  e,32
+        ld  d,b
+        mlt de
+        ld  a,e
+        add a,c
+        ld  e,a
+        add hl,de
+        ;ex  de,hl
+    pop hl
+
+    ;TODO: Find way to link stuff above. The task set forth is the following:
+    ;Create the main tile rendering loop. We must track the following:
+    ;   Screen pointer, nametable position, loop parameters.
+    ;With these, we will:
+    ;1. Get tileID from nametable position
+    ;2. Get attribute data associated with that tile.
+    ;3. Retrieve CHR_ROM data and
+    ;4. Combine it to retrieve color data, then write it to screen buffer.
+    ;
+    ;Later on, insert a cacheing step between 2 and 3. to selectively
+    ;modify step 4.
+    ;
+    ; Do in the inlining thing later.
+    ;
+
+
+;Some test code for things I may integrate later. They use a different
+;display paradigm than the code in the actual stuff. For now.
+;Just gotta jot my thoughts down.
+
+
+
+    ; Chunks of the block below will be everywhere. But we need to pump the
+    ; first itration with a known value so that further pointer increments
+    ; will... well. yanno. Let's just copy that bit off the already-completed
+    ; stuff in the actual stuff.
+    ; Speaking of actual stuff, I need to modify it to work with a 256-wide
+    ; screen buffer simply to test if the logic behind all these weird
+    ; memory accesses is correct. Gosh darn it. I keep delaying that test >.>
+
+    ;Let's assume that SP is corretly set.
+    ;Retrieve attribute byte from nametable, using BC to preserve DE
+    ld  c,e
+    ld  b,d
+    ld  a,d
+    rra
+    srl e
+    rra
+    srl e       ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rlca
+    rlca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  e,c
+    ld  d,b
+    ;Selects attribute from A bitpacked DE = %------yy yYyxxxXx y: e6, x: e1
+    ;into the format %0000AA00
+    bit 6,e
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,e
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+    ld  (ix+TEMP_MEMORY+2),a
+    ld  bc,(ix+TEMP_MEMORY)
+    ld  b,a
+    ld  c,a
+
+
+
+
+
+
+
+
+    ;Probably don't need this code since buffer pointer is either already
+    ;set from Y-scroll first iteration, or set to exactly screenbuf.
+    ld  b,(ix+PPU_VCOUNT)
+    ld  c,8
+    mlt bc
+    ld  c,(ix+PPU_HCOUNT)
+    ld  hl,$000000  ;Pointer to current VRAM buffer.
+    add hl,bc
+    ld  bc,(256*8)+8
+    add hl,bc
+    ld  sp,hl
+
+
+
+
+
+
+
+
+ppu_midVertLoop:
+
+
+
+ppu_midHorizLoop:
+
+
+
+
+    ld  a,(de)      ;DE=nametable pointer
+    ld  c,a
+    ld  b,64        ;sprites are 64 bytes wide
+    mlt bc
+    ld  iy,$000000  ;FILL IN LATER TO POINTER TO BG TILE CACHE/BUFFER
+    add iy,bc
+    ;
+    ;
+    ;
+    ;r7 21 bytes per segement. 
+    ld  hl,(iy+64- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r6
+    ld  hl,(iy+56- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r5
+    ld  hl,(iy+48- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r4
+    ld  hl,(iy+40- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r3
+    ld  hl,(iy+32- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r2
+    ld  hl,(iy+24- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r1
+    ld  hl,(iy+16- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;r0
+    ld  hl,(iy+ 8- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ld  hl,256-8        \   add hl,sp   \   ld  sp,hl
+    ;320 cycles per tile. Not as good as I first thought.
+    ld  hl,(256*8)+8
+    add hl,sp
+    ld  sp,hl
+    dec (ix+PPU_HCOUNT)
+    jp  nz,ppu_midHorizLoop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+;    ***   *** ***** *   *  ***  *          *** ***** *   * ***** *****
+;   *   * *      *   *   * *   * *         *      *   *   * *     *    
+;   ***** *      *   *   * ***** *          ***   *   *   * ***   ***  
+;   *   * *      *   *   * *   * *             *  *   *   * *     *    
+;   *   *  ***   *    ***  *   * *****      ***   *    ***  *     *    
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+;
+ppu_init:
+    ; Reset palette RAM, PPU, and APU registers
+    ld  ix,core_memory_ix
+    lea hl,ix-128
+    lea de,ix-127
+    ld  bc,126
+    ld  (hl),$00
+    ldir
+    ; Bit pattern used in detecting even-odd frames
+    ld  a,WREG_CONST
+    ld  (ix+PPU_W),a
+    ; Copies converted 64 colors to hardware LCD palette RAM.
+    ; The data is from https://www.nesdev.org/wiki/PPU_palettes
+    ; The destination is the Primecell PL111 LCD controller, documented here:
+    ; https://wikiti.brandonw.net/index.php?title=84PCE:Ports:4000
+    ld  de,mpLcdPalette
+    ld  hl,paletteData
+    ld  bc,64*2
+    ldir
+    ; Sets up the core's interrupt subsystem
+    xor a,a
+    ld  (int_table_len),a
+    ld  de,ppu_isr
+    ld  bc,27939
+    call int6502_insertISA  ;sets ix. ix before this unknown.
+    ld  (ix+PPU_SUBCYCLE),2
+    ret
+
+
+
+;Some bits of this is in "coreint.z80"
+ppu_isr:
+    ld  a,($F00020)
+    and a,%0000001
+    jp  nz,endCurrentRun    ;stop execution when ON key is pressed
+
+    ld  a,(ix+PPU_CTRL)
+    and a,%00011000     ;sprite and background. if zero, no rendering happens.
+    ;jr  z,ppu_isr_nodraw
+    ;perform the check that makes odd cycles one ppu cc shorter, but only if
+    ;something is being rendered to the screen
+    ld  a,(ix+PPU_FRAMECOUNT)
+    rrca
+    jr  nc,+_
+    dec (ix+PPU_SUBCYCLE)
+_:  ;there... should be something else to do?
+    ;call ppu_drawBGSprites
+    push iy
+        call ppu_drawFrame
+    pop iy
+    ;call ppu_drawFGSprites
+ppu_isr_nodraw:
+    inc (ix+PPU_FRAMECOUNT)
+    ld  bc,27939
+    ld  a,(ix+PPU_SUBCYCLE)
+    add a,2     ;add the 2/3rds cycle
+    cp  a,3     ;but is it more than 3? (0,1,2)
+    jr  c,+_
+    sub a,3
+    inc bc
+_:  ld  (ix+PPU_SUBCYCLE),a
+    lea hl,iy+0
+    or  a,a
+    sbc hl,bc
+    push hl
+    pop iy
+    ld  de,ppu_isr
+    call int6502_adjustTimings
+    call int6502_pushISRAfterPop
+    set 7,(ix+PPU_STATUS)
+    ld  hl,(ppu_smc_gate)
+    ld  (hl),$00        ;nop out ret so writes no longer ignored.
+    ;
+    ; TODO: Figure this one out:
+    ; Do we need something to unset VBlank active flag at the end of
+    ; VBlank if left unread?
+    ;
+    bit 7,(ix+PPU_CTRL)     ;VBlank NMI enable flag
+    jp  z,i6502RetryFirstLoad
+    ld  a,$FF
+    ld  (ix+NMI_TRIGGERED),a
+    jp  inst6502_brk
+
+
+
+
+
+
+ppu_drawFrame:
+    ;set base rom addresses
+    ld  hl,(chr_rom_base)
+    ld  bc,$001000
+    ld  a,(ix+PPU_CTRL)
+    push hl
+        bit 4,a     ;background pattern base offset
+        jr  z,+_
+        add hl,bc
+_:      ld  (chr_rom_tiles),hl
+    pop hl
+    bit 5,a     ;sprite pattern base offset
+    jr  z,+_
+    add hl,bc
+_:  ld  (chr_rom_sprites),hl
+    ;set coarse x,y scroll positions. B=Y, C=x
+    ld  bc,(ix+PPU_XSCROLL)
+    sla b
+    sla b
+    sla b
+    sla c
+    sla c
+    sla c
+    ;set base nametable addresses
+    ld  hl,nametable00
+    ld  a,(ix+PPU_CTRL)
+    and a,3
+    add a,a
+    add a,a
+    ld  L,a
+    ld  (ix+PPU_NAMETABLE_PTR),hl   ;yeah. let's cache this so we don't lose it
+    ;In-place setting of nametable address wrt X,Y
+    ;%------YY YYYXXXXX
+    ld  de,(hl)
+    ld  a,c
+    rlca
+    rlca
+    rlca
+    ld  e,a
+    xor a,d
+    and a,%00000011
+    xor a,d
+    ld  a,e
+    xor a,b
+    and %11100000
+    xor a,b
+    ld  e,a
+    ;Fetch first attribute byte from address
+    ;%------YY YYYXXXXX -> %------11 11YYYXXX
+    push de
+        ld  a,d
+        rra
+        srl e
+        rra
+        srl e       ;YYYYYXXX
+        set 0,d
+        set 1,d
+        ld  a,e
+        rlca
+        rlca
+        or  a,%11000000
+        xor a,e
+        and a,%11111000
+        xor a,e
+        ld  e,a
+        ld  a,(de)
+    pop de
+    ;Selects attribute from A from B=Y, C=X in format %0000AA00
+    ;Let's instead use DE %------yy yYyxxxXx y: e6, x: e1
+    bit 6,e
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,e
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+    ld  (ppu_mainTileLoop_attribute_write),a
+
+    ld  (ix+PPU_VCOUNT),30
+    ld  iy,(curScreenBuf)
+    lea iy,iy+32
+ppu_verticalLoop:
+    ld  (ix+PPU_HCOUNT),32
+ppu_horizontalLoop:
+    ld  a,(de)
+    push hl
+        push de
+            ld  hl,(chr_rom_tiles)
+            ld  c,a
+            ld  b,16
+            mlt bc
+            add hl,bc
+            ld  (ix+PPU_TCOUNT),8
+            lea de,iy+0
+ppu_mainTileLoop:
+            ld  a,(hl)
+            ld  bc,8
+            add hl,bc
+            ld  b,(hl)
+            ld  c,a
+            push hl
+                ld  hl,vram_palette
+ppu_mainTileLoop_attribute_write    .equ $+1
+                ld  a,0
+                ;Attrib to LSB of VRAM_PALETTE, shift CHR_ROM data to LSB to
+                ;form full address+offset. Copy from palette to buffer.
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;1/8 12b apiece
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;2/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;3/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;4/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;5/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;6/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;7/8
+                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;8/8 96b tot
+                ld  hl,256-8
+                add hl,de
+                ex  de,hl
+            pop hl
+            ld  bc,-7
+            add hl,bc
+            dec (ix+PPU_TCOUNT)
+            jr  nz,ppu_mainTileLoop
+            ;start wrapping up the horizontal loop
+        pop de
+    pop hl
+    ld  a,e
+    inc de
+    xor a,e
+    bit 5,a     ;A carry in X would result in a change in bit 5
+    jr  z,+_    ;Which means there's no crossover if no sign change
+    dec de      ;revert those changes in case they cascaded past E
+    inc e
+    and a,%11100000     ;The funny thing is that the XOR above...
+    xor a,e             ;... is still valid for this masking technique.
+    ld  c,a     ;And now let's squirrel this and...
+    ld  b,d     ;...D for later merge magic
+    ld  a,h
+    xor a,%00000100 ;flip to the next horizontal buffer...
+    ld  h,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor d
+    and a,%00000011
+    xor d
+    ld  d,a         ;and map coords into a new nametable
+_:  lea iy,iy+8     ;next position on the buffer.
+    dec (ix+PPU_HCOUNT)
+    jp  nz,ppu_horizontalLoop
+    ;the X buffer *will* have changed at some point and rolled around
+    ;so there's no need to deal with X. Still gotta do Y first...
+    ex  de,hl
+    ld  a,h
+    ld  bc,%00100000
+    add hl,bc   ;%-----^yy yYyxxxXx
+    ex  de,hl
+    ld  c,e     ;coordinate storage.
+    ld  b,d
+    xor a,d     ;detect sign change in bit 2
+    bit 2,a
+    jr  z,+_
+    ld  a,L
+    xor a,%00001000 ;flip to the next vertical buffer...
+    ld  L,a
+_:  ld  a,L
+    xor a,%00000100 ;flip back the horizontal buffer that must've been flipped.
+    ld  L,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor d
+    and a,%00000011
+    xor d
+    ld  d,a         ;and map coords into a new nametable
+    ld  bc,(256*7)+(256-256)
+    add iy,bc       ;move cursor pointer to the next row
+    dec (ix+PPU_VCOUNT)
+    jp  nz,ppu_verticalLoop
+    ret
+
+;TODO: Test changes to the PPU and link together something in the mapper
+;to perform controls. Also. Those freakin' interrupts. DO THEM.
+;Might also want to implement a drawlist of sorts since writes to the ports
+;ought to be timestamped. That way, we'll be able to tell what the hell is
+;being done mid-frame and then make adjustments to such things as
+;BG rendering mid-draw, if necessary. Or be able to detect such attempts as
+;I don't think I want to deal with that. Only deal with stuff that should
+;be occurring within the VBlank period.
+
+
+
+
+;backdrop color. Do not render the following if there are no
+;sprites to hide in the background.
+    ld  hl,(curScreenBuf)
+    ld  bc,256*224+1    ;because push.
+    add hl,bc
+    ld  (++_+1),sp
+    ld  sp,hl
+    ld  b,191
+    ld  de,0
+_:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    djnz -_
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de 
+_:  ld  sp,0
+;The following is a framecounter. Mask out if needed.
+    ld  hl,1
+    ld  (xPos),hl   
+    ld  a,(ix+PPU_FRAMECOUNT)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    xor a,a
+    sbc hl,hl
+    ld  de,($F20000)
+    ld  a,d
+    or  a,a     ;Framerate too large to bother calculating. Or far too small.
+    jr  z,ppu_noframerate
+    ld  ($F20000),hl
+    ld  hl,32768
+    xor a,a
+_:  inc a
+    sbc hl,de
+    jr  nc,-_
+    dec a
+    or  a,a ;clears necessary flags
+    daa
+    push de
+        call printSmallNumPair
+        ld  a,'.'
+        call printBigFont
+    pop de
+    xor a,a
+    ld  e,d
+    ld  d,a
+    ld  hl,32768/256*100
+_:  inc a
+    sbc hl,de
+    jr  nc,-_
+    dec a
+    or  a,a ;clears necessary flags
+    daa
+    call printSmallNumPair
+ppu_noframerate:
+    call fastCopy
+    ret
+
+
+
+
+
+

@@ -1,0 +1,72 @@
+#include "ti84pce.inc"
+#include "defs.inc"
+
+.org userMem-2
+.db $EF, $7B
+
+programStart:
+    di
+    call startGfx
+    ;
+    ; Start ASM-y stuff here.
+    ;
+    ld  hl,$55AA9D      ;STA 55AA,X
+    ld  (debugram),hl
+    ld  ix,core_memory_ix
+    lea de,ix+1
+    lea hl,ix+0
+    ld  (hl),$00
+    ld  bc,31
+    ldir
+    ld  hl,screenBuf1
+    ld  de,screenBuf1+1
+    ld  bc,(2*320*240)-1
+    ld  (hl),0
+    ldir
+
+    ld  a,2
+    call setLineStart
+    ld  a,1
+    call setCurLine
+    ld  b,9     ;9 instructions to decode
+    ld  hl,decodethis
+_:  ld  de,(hl)
+    ld  (debugram),de
+    ld  a,e
+    ;jr $
+    call dbg_getInstSize
+    ld  de,0
+    ld  e,a
+    add hl,de
+    call dbg_printDisassembly
+    call newLine
+    djnz -_
+
+    call fastCopy
+
+    jr $
+
+    ;
+    ; End ASM-y stuff here.
+    ;
+    ld  iy,flags
+    call stopGfx
+    ret
+
+testText:
+.db "Hello world!",0
+testText2:
+.db "This is the second string!",0
+
+
+decodethis:
+.db $A9,$00,$AA,$A8,$BD,$11,$80,$C9,$00,$F0,$05,$99,$21,$40,$D0
+.db $F4,$02,$48,$65,$6C,$6C,$6F,$2C,$20,$57,$6F,$72,$6C,$64,$21,$00
+
+
+
+
+#include "lcd.z80"
+#include "debug.z80"
+
+.echo "Debug test program size: ",$-programStart

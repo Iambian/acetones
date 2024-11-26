@@ -1,0 +1,360 @@
+;This has all the tables needed to drive the debugger.
+#include "debug_itab.z80"
+
+
+;You must assign a print character routine.
+;You must also write all opcode bytes to operbuf or map operbuf to where written
+dbg_printChr    = PrintBigFont
+operbuf         = debugram
+
+
+dbg_resetScreen:
+    ld  hl,screenBuf1
+    ld  de,screenBuf1+1
+    ld  bc,(2*240*320)-1
+    ld  (hl),$00
+    ldir
+    xor a,a
+    call setLineStart
+    call setCurLine
+    ret
+
+dbg_prepNextLine:
+    xor a,a
+    ld  (xPos),a
+    call calculateScreenPtr
+    ex  de,hl
+    ld  hl,screenBuf2-1
+    or  a,a
+    sbc hl,de
+;If C: DE in sb2. subtract to set in sb1.
+;If NC: DE in sb1. add to set in sb2.
+    ld  hl,320*240
+    jr  nc,+_
+    ld  hl,-(320*240)+0
+_:  add hl,de   ;HL set to other buffer. DE points to current buffer.
+    ld  bc,320*8    ;copy one line from other buffer to current buffer.
+_:  ld  a,(hl)
+    add a,1     ;carry if $FF (white), NC if not
+    sbc a,a     ;if carry, returns to $FF, else is black
+    ld  (hl),a
+    ldi
+    jp  pe,-_
+    ld  a,(yPos)
+    cp  a,29
+    jr  nz,+_
+    ld  hl,-(320*240)
+    add hl,de
+    ex de,hl        ;if bottom of screen, then reset DE to top of screen.
+_:  push de
+    pop hl
+    inc de
+    ld  (hl),c
+    ld  bc,(320*7)-1    ;erase whole line below it to prepare for writing.
+    ldir
+    ret
+
+;Input: ix = core_memory_ix 
+;Output: Text onscreen
+dbg_printLine:
+    push hl \ push bc \ push de \ push ix \ push iy \ push af
+    lea hl,iy+0
+    ld  (ix+CYCLES_CURRENT),hl
+    ld  de,DEBUG_PRINT_START_CYCLE
+    or  a,a
+    sbc hl,de
+    jp  c,dbg_printLine_noPrint
+
+    ld  a,$1A   ;blue
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
+    ld  hl,(ix+CURRENT_OPCODES)
+    ld  (operbuf),hl
+    call dbg_prepNextLine
+    call newLine
+    ld  a,(ix+REGPC+1)
+    call printSmallNumPair
+    ld  a,(ix+REGPC+0)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'A'
+    call printBigFont
+    ld  a,(ix+REGA)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'X'
+    call printBigFont
+    ld  a,(ix+REGX)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'Y'
+    call printBigFont
+    ld  a,(ix+REGY)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'S'
+    call printBigFont
+    ld  a,(ix+REGSP)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ;
+    ld  a,'P'
+    call printBigFont
+    ld  a,(ix+REGSR)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+
+    ;
+;    ld  hl,dbg_printLine_str001
+;    call printString
+;    ld  b,5
+;    lea hl,ix+0
+;_:  ld  a,(hl)
+;    inc hl
+;    push bc
+;        push hl
+;            call printSmallNumPair
+;            ld  a,' '
+;            call printBigFont
+;        pop hl
+;    pop bc
+;    djnz -_
+
+    ld  a,(ix+CYCLES_CURRENT+2)
+    call printSmallNumPair
+    ld  a,(ix+CYCLES_CURRENT+1)
+    call printSmallNumPair
+    ld  a,(ix+CYCLES_CURRENT+0)
+    call printSmallNumPair
+    ld  a,' '
+    call printBigFont
+    ld  hl,(operbuf)
+    ld  (ix+CURRENT_OPCODES),hl
+    ld  a,L
+    call dbg_getInstSize
+    ld  b,3
+    ld  c,a
+    inc c
+    lea hl,ix+CURRENT_OPCODES
+_:  ld  a,(hl)
+    inc hl
+    push hl
+        dec c
+        jp p,+_
+        inc c   ;never let c go below zero.
+_:      push bc
+            jr  z,+_
+            call printSmallNumPair
+            jr ++_
+_:          ld  a,' '
+            call printBigFont
+_:      pop bc
+    pop hl
+    djnz ----_
+    ld  a,' '
+    call printBigFont
+    call dbg_printDisassembly
+
+    ;
+    ;Remove section below when done testing nestest for timings
+    ;
+dbg_printLine_noPrint:
+    ld  de,0
+    ld  hl,(timings_base)
+    ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (timings_base),hl
+    ld  hl,(ix+CYCLES_CURRENT)
+    or  a,a
+    sbc hl,de
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_timeMismatch
+    call printString
+    ld  (ix+CORE_ERROR_LEVEL),1
+_:  ld  hl,(timings_base)
+    ld  a,(hl)
+    inc hl
+    ld  (timings_base),hl
+    cp  a,(ix+REGSR)
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_statusRegisterMismatch
+    call printString
+    ld  (ix+CORE_ERROR_LEVEL),2
+_:
+    ;
+    ;End debug-debug section
+    ;
+    call fastCopy
+    xor a,a     ;black
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
+
+    pop af \ pop iy \ pop ix \ pop de \ pop bc \ pop hl
+    ;push hl \ push bc \ push de \ push ix \ push iy \ push af
+    ret
+
+
+    ;also remove this when done timing debugging
+    ld  de,0
+    ld  hl,(timings_base)
+    ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (timings_base),hl
+    ld  hl,(ix+CYCLES_CURRENT)
+    or  a,a
+    sbc hl,de
+    jr  z,+_
+    ld  hl,-1
+    ld  (ix+CYCLES_CURRENT),hl  ;halt simulator
+    call newLine
+    ld  hl,dbg_printLine_timeMismatch
+    call printString
+_:  ;
+    ;End debug-debug section
+    ;
+    call fastCopy
+    xor a,a     ;black
+    ld  (fontBGColor_var),a
+    ld  (smallFontBGColor_var),a
+    pop af \ pop iy \ pop ix \ pop de \ pop bc \ pop hl
+    ret
+
+dbg_printLine_str001:
+.db "AXYSP ",0
+dbg_printLine_timeMismatch:
+.db "CPU Test timing mismatch.",0
+dbg_printLine_statusRegisterMismatch:
+;    0123456789012345678901234567890123456789
+.db "CPU Test status register mismatch.",0
+
+
+
+
+
+
+;A=instruction. Returns: A=size
+dbg_getInstSize:
+    push hl \ push de
+        ld  d,a
+        ld  e,4
+        mlt de
+        ld  hl,inst6502_disassembly_table+3
+        add hl,de
+        ld  d,0
+        ld  e,(hl)
+        ld  hl,inst6502_opcode_width_table
+        add hl,de
+        ld  a,(hl)
+    pop de \ pop hl
+    ret
+
+dbg_printDisassembly:
+    push af \ push bc \ push de \ push hl \ push ix
+    ;find entry in disassembly table
+    ld  hl,(operbuf)
+    ld  H,4
+    mlt hl
+    ld  de,inst6502_disassembly_table
+    add hl,de
+    ld  b,3
+_:  ld  a,(hl)
+    inc hl
+    call dbg_printC
+    djnz -_
+    ld  a,' '
+    call dbg_printC
+    ld  b,(hl)
+    inc b
+    ;Instruction addressing mode in B. Now find text for that address mode.
+    ld  hl,inst6502_disassembler
+    ld  de,0
+_:  ld  e,(hl)
+    add hl,de
+    djnz -_
+    dec e
+    jr  z,dbg_printDisassembly_end  ;stop if text is zero-sized
+    sbc hl,de   ;rewind to start of text part of instruction. E is text length.
+    ld  b,e
+dbg_printDisassembly_printOperandLoop:
+    ld  a,(hl)
+    inc hl
+    cp  a,'1'
+    jr  nz,+_
+    call dbg_printOperand1
+    jr  dbg_PrintDisassembly_printOperandFallthrough
+_:  cp  a,'2'
+    jr  nz,+_
+    call dbg_printOperand2
+    jr  dbg_PrintDisassembly_printOperandFallthrough
+_:  cp  a,'-'
+    jr  nz,+_
+    call dbg_printRel1
+    jr  dbg_PrintDisassembly_printOperandFallthrough
+_:  call dbg_printC
+dbg_PrintDisassembly_printOperandFallthrough:
+    djnz dbg_printDisassembly_printOperandLoop
+dbg_printDisassembly_end:
+    pop ix \ pop hl \ pop de \ pop bc \ pop af
+    ret
+
+dbg_printRel1:
+    ld  a,(operbuf+1)
+    or  a,a
+    jp  p,dbg_printRel1_skipNeg
+    push af
+        ld   a,'-'
+        call dbg_printC
+    pop af
+    neg
+dbg_printRel1_skipNeg:
+    jr dbg_printHex
+
+dbg_printOperand2:
+    ld  a,(operbuf+2)
+    call dbg_printHex
+dbg_printOperand1:
+    ld  a,(operbuf+1)
+dbg_printHex:
+    call dispAHex
+    ret
+
+dispAHex:
+    push af
+        call +_
+    pop af
+    jr  ++_
+_:  rra
+    rra
+    rra
+    rra
+_:  or  a,$F0
+    daa
+    add a,$A0
+    adc a,$40
+dbg_printC:
+    push hl
+        push bc
+            call dbg_printChr
+        pop bc
+    pop hl
+    ret
