@@ -35,7 +35,14 @@ main_ram            .equ $D03800        ;$0800 bytes of main system memory
 ZEROPAGE            .equ main_ram+(0*256)
 STACKBASE           .equ main_ram+(1*256)
 
-BASETABLE           .equ $D04000        ;variable size. 256*BASETABLE_STRIDE
+NAMETABLE1          .equ $D04000
+NAMETABLE2          .equ $D04400
+NAMETABLE3          .equ $D04800    ;These two don't exist on the NES but
+NAMETABLE4          .equ $D04C00    ;are present here in case mappers.
+OBJECT_ATTRIB_MEM   .equ $D05000    ;256 BYTES
+
+
+BASETABLE           .equ $D08000        ;variable size. 256*BASETABLE_STRIDE
 BASETABLE_STRIDE    .equ 12
 PAGETABLE_OFFSET    .equ 0
 PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
@@ -44,9 +51,6 @@ JUMPTABLE           .equ BASETABLE+JUMPTABLE_OFFSET
 USETABLE_OFFSET     .equ 8
 USETABLE            .equ BASETABLE+USETABLE_OFFSET
 
-NAMETABLE1          .equ BASETABLE+(512*BASETABLE_STRIDE)
-NAMETABLE2          .equ NAMETABLE1 + 1024  ;1024 BYTES
-OBJECT_ATTRIB_MEM   .equ NAMETABLE2 + 1024  ;256 BYTES
 
 ;
 ;saferam1 1024 bytes storage

@@ -574,43 +574,10 @@ _:  ld  a,L
     add iy,bc       ;move cursor pointer to the next row
     dec (ix+PPU_VCOUNT)
     jp  nz,ppu_verticalLoop
-    ret
-
-;TODO: Test changes to the PPU and link together something in the mapper
-;to perform controls. Also. Those freakin' interrupts. DO THEM.
-;Might also want to implement a drawlist of sorts since writes to the ports
-;ought to be timestamped. That way, we'll be able to tell what the hell is
-;being done mid-frame and then make adjustments to such things as
-;BG rendering mid-draw, if necessary. Or be able to detect such attempts as
-;I don't think I want to deal with that. Only deal with stuff that should
-;be occurring within the VBlank period.
 
 
 
 
-;backdrop color. Do not render the following if there are no
-;sprites to hide in the background.
-    ld  hl,(curScreenBuf)
-    ld  bc,256*224+1    ;because push.
-    add hl,bc
-    ld  (++_+1),sp
-    ld  sp,hl
-    ld  b,191
-    ld  de,0
-_:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    djnz -_
-    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de 
-_:  ld  sp,0
 ;The following is a framecounter. Mask out if needed.
     ld  hl,1
     ld  (xPos),hl   
@@ -652,6 +619,46 @@ _:  inc a
 ppu_noframerate:
     call fastCopy
     ret
+
+
+    ret
+
+;TODO: Test changes to the PPU and link together something in the mapper
+;to perform controls. Also. Those freakin' interrupts. DO THEM.
+;Might also want to implement a drawlist of sorts since writes to the ports
+;ought to be timestamped. That way, we'll be able to tell what the hell is
+;being done mid-frame and then make adjustments to such things as
+;BG rendering mid-draw, if necessary. Or be able to detect such attempts as
+;I don't think I want to deal with that. Only deal with stuff that should
+;be occurring within the VBlank period.
+
+
+
+
+;backdrop color. Do not render the following if there are no
+;sprites to hide in the background.
+    ld  hl,(curScreenBuf)
+    ld  bc,256*224+1    ;because push.
+    add hl,bc
+    ld  (++_+1),sp
+    ld  sp,hl
+    ld  b,191
+    ld  de,0
+_:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    djnz -_
+    push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
+    push de \ push de \ push de \ push de \ push de 
+_:  ld  sp,0
+
 
 
 

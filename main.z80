@@ -35,59 +35,7 @@ programStart:
     ld  a,$D0
     ld  MB,a
     call startGfx
-
-    ld  hl,vRam
-    ld  (mpLcdBase),hl
-    ld  de,vRam+1
-    ld  bc,320*240-1
-    ld  (hl),0
-    ldir
-    call waituntilnewkeypress
-    call waituntilkeyrelease
-
-    call setSmolScreenMode
-
-    ld  hl,vRam
-    ld  (mpLcdBase),hl
-    ld  hl,$0000
-    ;Write data into vRam. Draw a simple box.
-    ld  hl,vRam
-    ld  de,vRam+1
-    ld  bc,256*224-1
-    ld  (hl),$E8        ;red box. Rose?
-    ldir
-    ld  hl,vRam
-    ld  de,vRam+1
-    ld  bc,255
-    ld  (hl),$57
-    ldir                ;top side. blue
-    ld  hl,vRam+(256*223)
-    ld  de,vRam+(256*223)+1
-    ld  bc,255
-    ld  (hl),$57
-    ldir                ;bottom side. blue
-    ld  hl,vRam+256
-    ld  de,255
-    ld  b,224-2
-_:  ld  (hl),$25        ;green left/right sides
-    add hl,de
-    ld  (hl),$25
-    inc hl
-    djnz -_
-
-    call waituntilnewkeypress
-    call waituntilkeyrelease
-
-
-    ;Restore defaults. First set sitronix window params, then primecell params.
-    call setFullScreenMode
-
-    jp endCurrentRun
-
-
-
-
-
+    call clearVram
 
     ;
     ; todo; write test 6502 program, map it into rom.
@@ -102,19 +50,11 @@ _:  ld  (hl),$25        ;green left/right sides
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
 
-    ld  hl,screenBuf1
-    ld  de,screenBuf1+1
-    ld  bc,(2*240*320)-1
-    ld  (hl),$00
-    ldir
-
     ;Makes sure all non-ROM areas have a mapping
     ld  hl,scrap_mapping
     ld  bc,$008001
     ld  e,0
     call i6502_map_pages
-
-
 
     ;load reset vectors
     ld  hl,testVectors
@@ -182,6 +122,12 @@ _:      ld  a,(hl)
 
     ;Initialize all (additional) state machines,
     ;then initialize/start the emulation core
+
+    call setSmolScreenMode
+
+    ;a delay for the screen to settle
+    call waituntilnewkeypress
+    call waituntilkeyrelease
 
     call int6502_init
     call ppu_init
@@ -266,20 +212,16 @@ _:  ld  (hl),'i'
     ld  bc,63
     ld  (hl),0
     ldir
-
-
-
     jr ++_
 _:  
-.db $0E,$30,$30,$30 ;bg0
-.db $0E,$30,$30,$30 ;bg1
-.db $0E,$30,$30,$30 ;bg2
-.db $0E,$30,$30,$30 ;bg4
-.db $0E,$30,$30,$30 ;sp0
-.db $0E,$30,$30,$30 ;sp1
-.db $0E,$30,$30,$30 ;sp2
-.db $0E,$30,$30,$30 ;sp3
-
+.db $01,$30,$30,$30 ;bg0
+.db $01,$30,$30,$30 ;bg1
+.db $01,$30,$30,$30 ;bg2
+.db $01,$30,$30,$30 ;bg4
+.db $01,$30,$30,$30 ;sp0
+.db $01,$30,$30,$30 ;sp1
+.db $01,$30,$30,$30 ;sp2
+.db $01,$30,$30,$30 ;sp3
 
 _:  nop
     ;load palette RAM
@@ -287,21 +229,21 @@ _:  nop
     ld  de,vram_palette
     ld  bc,32
     ldir
-
-
+    
     ;set registers
     ld  (ix+PPU_XSCROLL),0      ;PPU_SCROLL is write-only. Data gets...
     ld  (ix+PPU_YSCROLL),0      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
 
+    jr $
+
     call ppu_drawFrame
 
-    call fastCopy
+    ;call fastCopy
 
     call waituntilnewkeypress
     call waituntilkeyrelease
-
 
     ;Performance timer disable and read.
 
@@ -315,6 +257,12 @@ _:  nop
     ld  hl,($F20000)
 
 endCurrentRun:
+    call setFullScreenMode
+    ld  hl,vRam
+    ld  de,vRam+1
+    ld  bc,320*240*2-1
+    ld  (hl),$00
+    ldir
     ;call dbg_prepNextLine
     ;call newLine
     ld  hl,text005
