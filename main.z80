@@ -154,51 +154,48 @@ _:      ld  a,(hl)
     ;===========================================================================
     ;===========================================================================
     ;===========================================================================
-    ;nametable fill
-    ld  hl,NAMETABLE1
-    push hl \ pop de
-    inc de
-    ld  bc,(32*30)-1
-    ld  (hl),'_'
-    ldir
-    ld  hl,NAMETABLE2
-    push hl \ pop de
-    inc de
-    ld  bc,(32*30)-1
-    ld  (hl),'*'
-    ldir
-    ;hide all sprites
+    ;Hide all sprites
     ld  hl,OBJECT_ATTRIB_MEM
     push hl \ pop de
     inc de
     ld  bc,255
     ld  (hl),$FF
     ldir
-    ;nametable 1 box pattern on displayable area (omit top and bottom 8 pixels)
+    ;Fill primary nametable with underscore. Full screen '_'
     ld  hl,NAMETABLE1
     push hl \ pop de
     inc de
     ld  bc,(32*30)-1
-    ld  (hl),'Z'
+    ld  (hl),'_'
     ldir
+    ;Fill secondary nametable with asterix. Full screen '*'
+    ld  hl,NAMETABLE2
+    push hl \ pop de
+    inc de
+    ld  bc,(32*30)-1
+    ld  (hl),'*'
+    ldir
+    ;Fill top row of primary nametable with lowercase 'w'
     ld  hl,NAMETABLE1+32
     push hl \ pop de
     inc de
     ld  bc,31
     ld  (hl),'w'
     ldir
-    ld  hl,NAMETABLE1+(32*29)
+    ;Fill bottom row of primary nametable with forward-slash '/'
+    ld  hl,NAMETABLE1+(32*28)
     push hl \ pop de
     inc de
     ld  bc,31
-    ld  (hl),'w'
+    ld  (hl),'/'
     ldir
+    ;Fill left side with '3' and right side with '8'
     ld  hl,NAMETABLE1+64
     ld  b,26
     ld  de,31
-_:  ld  (hl),'i'
+_:  ld  (hl),'3'
     add hl,de
-    ld  (hl),'l'
+    ld  (hl),'8'
     inc hl
     djnz -_
     ;clear attribute memory
@@ -214,10 +211,10 @@ _:  ld  (hl),'i'
     ldir
     jr ++_
 _:  
-.db $01,$30,$30,$30 ;bg0
-.db $01,$30,$30,$30 ;bg1
-.db $01,$30,$30,$30 ;bg2
-.db $01,$30,$30,$30 ;bg4
+.db $01,$39,$39,$39 ;bg0
+.db $0A,$37,$37,$37 ;bg1
+.db $06,$3C,$3C,$3C ;bg2
+.db $0E,$30,$30,$30 ;bg4
 .db $01,$30,$30,$30 ;sp0
 .db $01,$30,$30,$30 ;sp1
 .db $01,$30,$30,$30 ;sp2
@@ -231,12 +228,12 @@ _:  nop
     ldir
     
     ;set registers
-    ld  (ix+PPU_XSCROLL),0      ;PPU_SCROLL is write-only. Data gets...
-    ld  (ix+PPU_YSCROLL),0      ;... deposited into these two registers.
+    ld  (ix+PPU_XSCROLL),0*8      ;PPU_SCROLL is write-only. Data gets...
+    ld  (ix+PPU_YSCROLL),0*8      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
 
-    jr $
+    ;jr $
 
     call ppu_drawFrame
 

@@ -124,6 +124,7 @@ INT_CYCLE_OFFSET    .equ 3
 #define PPU_ADDR -26
 #define PPU_DATA -25
 ;PPU internal stuff
+#define PPU_XSCROLL_ROUGH -16   ;PPU_XSCROLL with fine adjustments shifted out.
 #define PPU_SUBCYCLE -15    ;0, 1, or 2.
 #define PPU_V -14           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)
 #define PPU_W -12           ;INTERNAL W REGISTER FOR HIGH/LOW BYTE PORT WRITES
