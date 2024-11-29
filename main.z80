@@ -21,10 +21,16 @@
 
 programStart:
     di
+    ;Initialize from start to safeRam to end of 16-bit block.
+    ld  hl,$D031F6
+    push hl \ pop de \ inc de
+    ld  bc,($10000-$31F6)-1
+    ld  (hl),$00
+    ldir
+    ;Configure ON-key interrupt hardware
     ld  ix,$F00000
     set 0,(ix+$2C)      ;Enable ON latch
     ld  (ix+$28),1      ;If latch was set, clear it.
-
     ;Continuous. Else it'd be possible for an NES ROM to tank the CPU
     ;performance by constantly polling the keyboard.
     ld  hl,mpKeyMode
@@ -128,6 +134,7 @@ _:      ld  a,(hl)
     ;a delay for the screen to settle
     call waituntilnewkeypress
     call waituntilkeyrelease
+    call ppuBufSwap
 
     call int6502_init
     call ppu_init
@@ -228,19 +235,20 @@ _:  nop
     ldir
     
     ;set registers
-    ld  (ix+PPU_XSCROLL),0*8      ;PPU_SCROLL is write-only. Data gets...
-    ld  (ix+PPU_YSCROLL),0*8      ;... deposited into these two registers.
+    ld  (ix+PPU_XSCROLL),4*8      ;PPU_SCROLL is write-only. Data gets...
+    ld  (ix+PPU_YSCROLL),4*8      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
 
     ;jr $
 
-    call ppu_drawFrame
+    call ppu_drawFrameSuper
 
-    ;call fastCopy
+    ;call ppuBufSwap
 
     call waituntilnewkeypress
     call waituntilkeyrelease
+    call setDefaultPalette
 
     ;Performance timer disable and read.
 

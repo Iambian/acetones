@@ -82,8 +82,10 @@ trainer_base        .equ mapper_adr_base+3  ;3b. If exist, starts here
 prg_rom_base        .equ mapper_adr_base+3  ;3b. Adjusted in case of trainer.
 chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
 chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
-ppu_smc_gate        .equ chr_rom_base_file+1 ;3b write address to ungate PPU
-timings_base        .equ ppu_smc_gate+3    ;3b. Current pointer to timings
+ppu_smc_gate        .equ chr_rom_base_file+1    ;3b write address to ungate PPU
+chr_rom_cachefrom_A .equ ppu_smc_gate+3         ;3b. source of cache in bank 1
+chr_rom_cachefrom_B .equ chr_rom_cachefrom_A+3  ;3b. source of cache in bank 2
+timings_base        .equ chr_rom_cachefrom_B+3  ;3b. Current pointer to timings
 
 SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
@@ -105,6 +107,14 @@ INT_TABLE_STRIDE    .equ 6
 INT_ADDR_OFFSET     .equ 0
 INT_CYCLE_OFFSET    .equ 3
 
+;
+;
+;
+
+ppuScreenBuf1       .equ vRam
+ppuScreenBuf2       .equ ppuScreenBuf1+(256*224)
+chr_rom_1_cache     .equ ppuScreenBuf2+(256*224)
+chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)
 
 
 ;
@@ -124,6 +134,7 @@ INT_CYCLE_OFFSET    .equ 3
 #define PPU_ADDR -26
 #define PPU_DATA -25
 ;PPU internal stuff
+#define PPU_
 #define PPU_XSCROLL_ROUGH -16   ;PPU_XSCROLL with fine adjustments shifted out.
 #define PPU_SUBCYCLE -15    ;0, 1, or 2.
 #define PPU_V -14           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)

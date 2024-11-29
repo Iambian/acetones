@@ -45,6 +45,18 @@ fastCopy:
 _:  ld  (mpLcdBase),hl
     ret
 
+ppuBufSwap:
+    ld  de,vRam
+    ld  hl,(mpLcdBase)
+    ld  (curScreenBuf),hl
+    or  a,a
+    sbc hl,de
+    ex  de,hl
+    jr  nz,+_
+    ld  hl,vRam+(256*224)
+_:  ld  (mpLcdBase),hl
+    ret
+
 stopGfx:
     call _boot_ClearVRAM
     ld  de,lcdNormalMode
