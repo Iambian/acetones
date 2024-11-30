@@ -134,7 +134,8 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)
 #define PPU_ADDR -26
 #define PPU_DATA -25
 ;PPU internal stuff
-#define PPU_
+#define PPU_XSCROLL_FINE -18
+#define PPU_YSCROLL_FINE -17
 #define PPU_XSCROLL_ROUGH -16   ;PPU_XSCROLL with fine adjustments shifted out.
 #define PPU_SUBCYCLE -15    ;0, 1, or 2.
 #define PPU_V -14           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)

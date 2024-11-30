@@ -5,6 +5,82 @@
 ; NOTES ON SPRITE 0 HIT IS LOCATED IN MAIN.Z80, AROUND THE CODE WHERE
 ; MAPPER 0 READ HANDLER HANDLES READING PPU_STATUS.
 
+
+;
+; Scratchpadding some stuff
+;
+
+
+;Note: Can't figure out how to keep DE as the pointer to the nametable.
+;Perhaps consider keeping nametable stuff inside the shadow registers?
+;
+;
+
+ppu_left:
+;PPU_XSCROLL_FINE
+;PPU_YSCROLL_FINE
+    ld  a,(ix+PPU_XSCROLL_FINE)
+    ld  c,a
+    ;ld  (ppu_left_smc_spriteset+2),a    ;page-aligned address. Use for right.
+    ld  (ppu_left_smc_spriteskip),a
+    add a,a     ;structure of jump table does the 8-x for us.
+    ld  (ppu_left_smc_jump),a
+    ;skip DE by 256-8+x => 248+x
+    add a,248
+    ld  (ppu_left_smc_bufferskip),a
+    ld  a,(de)
+    ld  (ppu_left_smc_restore_de),de
+    ;Buffer address would normally be in SP but initialized to the bottom
+    ;of the next sprite. we would do otherwise, but this isn't possible.
+    ;INSTEAD, MOVE THE SP INITIALIZATION FOR ALIGNED MODE TO THE ALIGNED
+    ;BACKGROUND ROUTINE, HERE, WE'LL ASSUME A HAND-OFF FROM
+    ld  c,a
+    ld  b,64
+    mlt bc
+ppu_left_smc_spriteset .equ $+1
+    ld  hl,0    ;SMC LATER ON VIA PPU DRAWFRAME INITIALIZER
+    add hl,bc
+    ld  a,8     ;NOTE: THIS IS WHAT WILL BE ADJUSTED FOR TOP-LEFT
+ppu_left_smc_jump .equ $+1
+    jr $
+    ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi
+ppu_left_smc_spriteskip .equ $+1+2
+    ld  bc,0
+    add hl,bc
+ppu_left_smc_bufferskip .equ $+1
+    ld  c,0
+    ex  de,hl
+    add hl,bc
+    ex  de,hl
+    dec a
+    jr  nz,ppu_left_smc_jump-1
+    ;Buffer address will be byte after bottom-right of partial sprite.
+    ;No special action needed other than re-reconciling addressing for
+    ;SP write method. Which... won't actually be that hard.
+
+
+
+
+
+
+
+
+ppu_left_smc_restore_de .equ $+1
+    ld de,0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ppu_cache_bank: ;HL=dest, DE=sauce
     push de
     pop iy
