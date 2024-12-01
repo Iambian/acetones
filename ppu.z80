@@ -16,57 +16,57 @@
 ;
 ;
 
+
+
+;
+; You may want to investigate macros to duplicate this bit of code but with
+; labels changed around based on a single input. This stretch of code is
+; going to be re-used a lot, and calling is out of the question, since the
+; stack is unavailable at the time these would be called. At least, not without
+; a painful amount of SP retrieval and storage.
+;
+
 ppu_left:
-;PPU_XSCROLL_FINE
-;PPU_YSCROLL_FINE
+;PPU_XSCROLL_FINE, PPU_YSCROLL_FINE
     ld  a,(ix+PPU_XSCROLL_FINE)
-    ld  c,a
-    ;ld  (ppu_left_smc_spriteset+2),a    ;page-aligned address. Use for right.
-    ld  (ppu_left_smc_spriteskip),a
-    add a,a     ;structure of jump table does the 8-x for us.
-    ld  (ppu_left_smc_jump),a
-    ;skip DE by 256-8+x => 248+x
-    add a,248
-    ld  (ppu_left_smc_bufferskip),a
     ld  a,(de)
-    ld  (ppu_left_smc_restore_de),de
-    ;Buffer address would normally be in SP but initialized to the bottom
-    ;of the next sprite. we would do otherwise, but this isn't possible.
-    ;INSTEAD, MOVE THE SP INITIALIZATION FOR ALIGNED MODE TO THE ALIGNED
-    ;BACKGROUND ROUTINE, HERE, WE'LL ASSUME A HAND-OFF FROM
+    exx
+    ;SP is presumed to have been rewound to the scanline at the top of the
+    ;sprite and on the left edge of the screen.
+ppu_left_bufinit .equ $+1
+    ld  hl,0
+    add hl,sp
+    ex  de,hl
     ld  c,a
     ld  b,64
     mlt bc
-ppu_left_smc_spriteset .equ $+1
-    ld  hl,0    ;SMC LATER ON VIA PPU DRAWFRAME INITIALIZER
+ppu_left_smc_sprinit .equ $+1
+    ld  hl,0
     add hl,bc
-    ld  a,8     ;NOTE: THIS IS WHAT WILL BE ADJUSTED FOR TOP-LEFT
-ppu_left_smc_jump .equ $+1
-    jr $
+ppu_left_smc_drawheight .equ $+1
+    ld  a,8
+ppu_left_smc_copylen .equ $+1
+    jr  $
     ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi
-ppu_left_smc_spriteskip .equ $+1+2
+ppu_left_smc_sprskip .equ $+1
     ld  bc,0
     add hl,bc
-ppu_left_smc_bufferskip .equ $+1
-    ld  c,0
     ex  de,hl
+ppu_left_smc_bufskip .equ $+1
+    ld  c,0
     add hl,bc
     ex  de,hl
     dec a
-    jr  nz,ppu_left_smc_jump-1
-    ;Buffer address will be byte after bottom-right of partial sprite.
-    ;No special action needed other than re-reconciling addressing for
-    ;SP write method. Which... won't actually be that hard.
+    jr  nz,ppu_left_smc_copylen-1
+ppu_left_smc_bufreset .equ $+1
+    ld  hl,-1
+    add hl,de
+    ld  sp,hl
+    exx
 
 
 
 
-
-
-
-
-ppu_left_smc_restore_de .equ $+1
-    ld de,0
 
 
 
