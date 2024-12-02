@@ -182,6 +182,20 @@ _:      ld  a,(hl)
     ld  bc,(32*30)-1
     ld  (hl),'*'
     ldir
+    ;Fill top and bottom-most rows of secondary nametable with "F" and "G",
+    ;respectively. This is to do bounds testing.
+    ld  hl,NAMETABLE2
+    push hl \ pop de
+    inc de
+    ld  bc,31
+    ld  (hl),'F'
+    ldir
+    ld  hl,NAMETABLE2+(32*29)
+    push hl \ pop de
+    inc de
+    ld  bc,31
+    ld  (hl),'G'
+    ldir
     ;Fill top row of primary nametable with lowercase 'w'
     ld  hl,NAMETABLE1+32
     push hl \ pop de
@@ -209,12 +223,12 @@ _:  ld  (hl),'3'
     ld  hl,NAMETABLE1+960
     ld  de,NAMETABLE1+961
     ld  bc,63
-    ld  (hl),0
+    ld  (hl),'B'
     ldir
     ld  hl,NAMETABLE2+960
     ld  de,NAMETABLE2+961
     ld  bc,63
-    ld  (hl),0
+    ld  (hl),'C'
     ldir
     jr ++_
 _:  
@@ -235,19 +249,93 @@ _:  nop
     ldir
     
     ;set registers
-    ld  (ix+PPU_XSCROLL),4*8      ;PPU_SCROLL is write-only. Data gets...
-    ld  (ix+PPU_YSCROLL),4*8      ;... deposited into these two registers.
+    ld  (ix+PPU_XSCROLL),0*8      ;PPU_SCROLL is write-only. Data gets...
+    ld  (ix+PPU_YSCROLL),0*8      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
 
     ;jr $
+;kbitDown	equ 00h
+;kbitLeft	equ 01h
+;kbitRight	equ 02h
+;kbitUp		equ 03h
+;kbitYequ equ 04h
+;kbit2nd		equ 05h
+;kbitMode	equ 06h
+;kbitDel		equ 07h
+;You can find the other defines approximately where I found the stuff above.
 
+drawFrameLoop:
+    ;Note: Not changing base this time around. For next time
     call ppu_drawFrameSuper
-
+    call getkbd_adl
+    push af
+        call waituntilkeyrelease
+    pop af
+    ld  ix,$D03280
+    lea hl,ix+PPU_YSCROLL
+    lea bc,ix+PPU_XSCROLL
+    ld  e,a
+    bit kbitDown,e
+    jr  z,+_
+    ld  a,(bc)
+    and a,%00000111
+    jr  nz,+_
+    ld  a,(hl)
+    add a,8
+    cp  a,$F0  ;bottom of screen
+    jr  c,+_-1
+    push af
+        ld  a,(ix+PPU_CTRL)
+        xor a,%00000010
+        ld  (ix+PPU_CTRL),a
+    pop af
+    add a,$10
+    ld  (hl),a
+_:  bit kbitUp,e
+    jr  z,+_
+    ld  a,(bc)
+    and a,%00000111
+    jr  nz,+_
+    ld  a,(hl)
+    sub a,8
+    jr  nc,+_-1
+    push af
+        ld  a,(ix+PPU_CTRL)
+        xor a,%00000010
+        ld  (ix+PPU_CTRL),a
+    pop af
+    sub a,$10
+    ld  (hl),a
+_:  bit kbitLeft,e
+    jr  z,+_
+    ld  a,(hl)
+    and a,%00000111
+    jr  nz,+_
+    ld  a,(bc)
+    sub a,8
+    ld  (bc),a
+    jr  nc,$+10
+    ld  a,(ix+PPU_CTRL)
+    xor a,%00000001
+    ld  (ix+PPU_CTRL),a
+_:  bit kbitRight,e
+    jr  z,+_    
+    ld  a,(hl)
+    and a,%00000111
+    jr  nz,+_
+    ld  a,(bc)
+    add a,8
+    ld  (bc),a
+    jr  nc,$+10
+    ld  a,(ix+PPU_CTRL)
+    xor a,%00000001
+    ld  (ix+PPU_CTRL),a
+_:  ld  a,e
+    and a,(1<<kbitMode)+(1<<kbit2nd)+(1<<kbitDel)+(1<<kbitYequ)
+    jp  z,drawFrameLoop
     ;call ppuBufSwap
 
-    call waituntilnewkeypress
-    call waituntilkeyrelease
     call setDefaultPalette
 
     ;Performance timer disable and read.

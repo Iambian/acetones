@@ -26,6 +26,25 @@
 ; a painful amount of SP retrieval and storage.
 ;
 
+    ;configuring things
+    ld  a,0
+    ld  (ppu_left_bufinit+2),a
+    ld  (ppu_left_smc_sprinit),a
+    ld  (ppu_left_smc_drawheight),a
+    ld  (ppu_left_smc_copylen),a
+    ld  (ppu_left_smc_sprskip),a
+    ld  (ppu_left_smc_bufreset),a
+
+    ld  (ppu_right_bufinit+2),a
+    ld  (ppu_right_smc_sprinit),a
+    ld  (ppu_right_smc_drawheight),a
+    ld  (ppu_right_smc_copylen),a
+    ld  (ppu_right_smc_sprskip),a
+    ld  (ppu_right_smc_bufreset),a
+
+
+
+
 ppu_left:
 ;PPU_XSCROLL_FINE, PPU_YSCROLL_FINE
     ld  a,(ix+PPU_XSCROLL_FINE)
@@ -65,12 +84,48 @@ ppu_left_smc_bufreset .equ $+1
     exx
 
 
+ppu_right:
+;PPU_XSCROLL_FINE, PPU_YSCROLL_FINE
+    ld  a,(ix+PPU_XSCROLL_FINE)
+    ld  a,(de)
+    exx
+    ;SP is presumed to have been rewound to the scanline at the top of the
+    ;sprite and on the left edge of the screen.
+ppu_right_bufinit .equ $+1
+    ld  hl,0
+    add hl,sp
+    ex  de,hl
+    ld  c,a
+    ld  b,64
+    mlt bc
+ppu_right_smc_sprinit .equ $+1
+    ld  hl,0
+    add hl,bc
+ppu_right_smc_drawheight .equ $+1
+    ld  a,8
+ppu_right_smc_copylen .equ $+1
+    jr  $
+    ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi \ ldi
+ppu_right_smc_sprskip .equ $+1
+    ld  bc,0
+    add hl,bc
+    ex  de,hl
+ppu_right_smc_bufskip .equ $+1
+    ld  c,0
+    add hl,bc
+    ex  de,hl
+    dec a
+    jr  nz,ppu_right_smc_copylen-1
+ppu_right_smc_bufreset .equ $+1
+    ld  hl,-1
+    add hl,de
+    ld  sp,hl
+    exx
 
 
 
-
-
-
+;Variant with x-scrolling being non-aligned
+ppu_drawFrame_xs:
 
 
 
@@ -129,30 +184,38 @@ ppu_drawFrameSuper:
     call nz,ppu_cache_bank
     ;===================================================================
     ;set primecell palette from PPU VRAM palette data
+    ld  hl,vram_palette
+    ld  de,vram_cache
+    ld  bc,32
+_:  ld  a,(de)
+    cp  a,(hl)
+    jr  nz,+_
+    ldi
+    jp  pe,-_
+    jr  ppu_drawFrameSuper_skipPaletteReload
+_:  ldir    ;finish the copy, then proceed to update palette
     ld  hl,paletteData      ;actual colors
     ld  de,mpLcdPalette     ;where colors go
-    ld  bc,vram_palette     ;indices found here
-    ld  a,(bc)
+    ld  iy,vram_palette     ;indices found here
+    ld  a,(iy)
     ld  (++_+1),a
-_:  ld  a,c
+    ld  bc,(32*256)+255 ;B=32 for loop. C=255 to keep B safe from LDI
+_:  ld  a,iyl
     and a,3
-    ld  a,(bc)
+    ld  a,(iy)
     jr  nz,+_+2
 _:  ld  a,0
-    push hl
-        push bc
-            ld  c,2
-            ld  b,a
-            mlt bc
-            add hl,bc
-            ldi
-            ldi
-        pop bc
-    pop hl
-    inc bc
-    ld  a,c
-    cp  a,32
-    jr  nz,--_
+    add a,a     ;input value range 0-63. Maybe 0-127 if single-extend.
+    add a,paletteData&255
+    ld  L,a
+    adc a,(paletteData>>8)&255
+    sub a,L
+    ld  h,a
+    ldi
+    ldi
+    inc iy
+    djnz --_
+ppu_drawFrameSuper_skipPaletteReload:
     ;set base rom addresses
     ld  hl,chr_rom_1_cache
     ld  de,chr_rom_2_cache
@@ -168,23 +231,6 @@ _:  ld  a,0
     jr  z,$+3
     ex de,hl
     ld  (chr_rom_sprites),hl
-    ;set coarse x,y scroll positions. B=Y, C=x.
-    ;Note: Pre-incrementing Y to simulate first row skip
-    ld  bc,(ix+PPU_XSCROLL)
-    ld  a,b
-    rra
-    rra
-    rra
-    and a,%00011111
-    inc a
-    cp  a,$30
-    jr  c,$+3
-    xor a,a
-    ld  b,a
-    sra c
-    sra c
-    sra c
-    ld  (ix+PPU_XSCROLL_ROUGH),c
     ;set base nametable addresses
     ld  hl,nametable00
     ld  a,(ix+PPU_CTRL)
@@ -193,6 +239,41 @@ _:  ld  a,0
     add a,a
     ld  L,a
     ld  (ix+PPU_NAMETABLE_PTR),hl   ;maybe this time we'll need it?
+    ;set coarse x,y scroll positions. B=Y, C=x.
+    ;Note: Pre-incrementing Y to simulate first row skip
+    ld  bc,(ix+PPU_XSCROLL)
+    ;HANDLE YSCROLL
+    ld  a,b
+    and a,%00000111
+    ld  (ix+PPU_YSCROLL_FINE),a
+    ld  a,b
+    rra
+    rra
+    rra
+    and a,%00011111
+    inc a
+    cp  a,30
+    jr  c,+_
+    push af
+        ld  a,L
+        xor a,%00001000
+        ld  L,a
+        ld  (ix+PPU_NAMETABLE_PTR),hl
+    pop af
+    sub a,30
+_:  ld  b,a
+    ;HANDLE XSCROLL
+    ld  a,c
+    and a,%00000111
+    ld  (ix+PPU_XSCROLL_FINE),a
+    ld  a,c
+    rra
+    rra
+    rra
+    and a,%00011111
+    ld  (ix+PPU_XSCROLL_ROUGH),a
+    ld  c,a
+
     ;In-place setting of nametable address wrt X,Y
     ;%------YY YYYXXXXX
     ld  de,(hl)
@@ -253,8 +334,10 @@ _:  and a,%00001100
     ld  hl,(curScreenBuf)
     add hl,bc
     ld  sp,hl
-    ld  (ix+PPU_VCOUNT),29      ;first row processed, do not draw last row
+    ld  (ix+PPU_VCOUNT),28      ;first row processed, do not draw last row
 
+    ld  a,(de)
+    ld  (ppu_debug_first_byte_in_nametable+1),a
 
     ;jr $
 
@@ -385,9 +468,14 @@ _:  ld  de,(hl)     ;Reset nametable
     jp  nz,ppu_midVertLoop
 ppu_midRestoreSP .equ $+1
     ld  sp,0
+    ;jr ppu_noframerateSuper
 ;The following is a framecounter. Mask out if needed.
     call newPage
     ld  a,(ix+PPU_FRAMECOUNT)
+
+ppu_debug_first_byte_in_nametable:
+    ld a,0
+
     call printFrameCounterPair
     ;call skipSpace
     xor a,a
@@ -406,6 +494,7 @@ _:  inc a
     or  a,a ;clears necessary flags
     daa
     push de
+        ld  a,(ix+PPU_XSCROLL)
         call printFrameCounterPair
         ;call skipSpace
     pop de
@@ -419,8 +508,9 @@ _:  inc a
     dec a
     or  a,a ;clears necessary flags
     daa
+    ld  a,(ix+PPU_YSCROLL)
     call printFrameCounterPair
-;ppu_noframerate:
+ppu_noframerateSuper:
     call ppuBufSwap
     ret
 
