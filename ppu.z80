@@ -310,6 +310,7 @@ _:  ld  b,a
     xor a,e
     ld  e,a
     ld  a,(de)
+    ld  (ix+PPU_ATTRIBUTE_CACHE),a
     ld  e,c \ ld  d,b
     ;Selects attribute from A bitpacked DE = %------yy yYyxxxXx y: e6, x: e1
     ;into the format %0000AA00
@@ -424,8 +425,53 @@ _:  ld  hl,(256*7)+16
     add hl,sp
     ld  sp,hl
     dec (ix+PPU_HCOUNT)
-    jp  nz,ppu_midHorizLoop
-    ;
+    jr  z,+++_
+    ld  a,e
+    dec a
+    xor a,e     ;undo earlier increment to check for boundary crossings
+    bit 2,a     ;coarse adjust: new byte
+    jr  nz,+_
+    bit 1,a     ;fine adjust: choose new byte orientation
+    jr  nz,++_
+    jp  ppu_midHorizLoop
+_:  ;Coarse adjust: Obtain new byte
+    ld  c,e \ ld  b,d
+    ld  a,d
+    rra
+    srl e
+    rra
+    srl e       ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rlca
+    rlca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  (ix+PPU_ATTRIBUTE_CACHE),a    
+    ld  e,c \ ld  d,b
+_:  ;fine adjust: Move byte, then load to SMC
+    ld a,(ix+PPU_ATTRIBUTE_CACHE)
+    bit 6,e
+    jr  z,$+6
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+    bit 1,e
+    jr  nz,$+4  ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+    and a,%00001100
+    ld  (ppu_midHorizLoop_masksmc+0),a
+    ld  (ppu_midHorizLoop_masksmc+1),a
+    ld  (ppu_midHorizLoop_masksmc+2),a
+    jp ppu_midHorizLoop
+_:  ;
     ;Vertical movement handling
     ;
     ld  hl,(ix+PPU_NAMETABLE_PTR)
