@@ -225,7 +225,9 @@ ppu_drawFrameSuper_skipPaletteReload:
     jr  z,$+3
     ex  de,hl
     ld  (chr_rom_tiles),hl
-    ld  (ppu_midHorizLoop_cachesmc),hl
+    ld  bc,64
+    add hl,bc
+    ld  (ppu_midHorizLoop_cachesmc),hl  ;cache at end of sprite
     pop de \ pop hl
     bit 5,a     ;sprite pattern base offset
     jr  z,$+3
@@ -328,9 +330,17 @@ _:  and a,%00001100
     ld  (ppu_midHorizLoop_masksmc+0),a
     ld  (ppu_midHorizLoop_masksmc+1),a
     ld  (ppu_midHorizLoop_masksmc+2),a
+    ld  (ppu_midRestoreSP),sp
+
+    ld  a,(ix+PPU_YSCROLL_FINE)
+    or  a,a
+    jp  nz,ppu_drawFrameSuper_fineYScrolling
+    ld  a,(ix+PPU_XSCROLL_FINE)
+    or  a,a
+;    jp  nz,ppu_drawFrameSuper_fineXScrolling
+
     ;Set SP to screen buffer write location. Which one byte past the end
     ;of the current tile at its bottom-right corner, no wrap.
-    ld  (ppu_midRestoreSP),sp
     ld  bc,(256*7)+8
     ld  hl,(curScreenBuf)
     add hl,bc
@@ -510,8 +520,13 @@ _:  ld  de,(hl)     ;Reset nametable
     ld  hl,256*7
     add hl,sp
     ld  sp,hl
+    ;
+    ; Note: You'll want to add in some kind of attribute byte correction at
+    ; this stage to handle left columns at boundaries
+    ;
     dec (ix+PPU_VCOUNT)
     jp  nz,ppu_midVertLoop
+ppu_drawFrameSuper_ending:
 ppu_midRestoreSP .equ $+1
     ld  sp,0
     ;jr ppu_noframerateSuper
@@ -559,6 +574,289 @@ _:  inc a
 ppu_noframerateSuper:
     call ppuBufSwap
     ret
+
+
+;set up some stuff, then do the fine Y scroll stuff
+ppu_drawFrameSuper_fineYScrolling:
+    ld  c,a ;fine Y scroll value
+    ld  a,(ix+PPU_XSCROLL_FINE)
+    or  a,a
+    jp  nz,ppu_drawFrameSuper_fineAllScrolling
+    ;Adjusting mask values. Only need to do this for the first row.
+    ld  hl,(ppu_midHorizLoop_masksmc)
+    ld  (ppu_fineYstart_mask),hl        ;others will be filled in-loop
+    ;Adjuting pointers to cache
+    ld  hl,(ppu_midHorizLoop_cachesmc)  ;recall midloop cache
+    ld  (ppu_fineYmidLoop_cache),hl
+    ld  (ppu_fineYendLoop_cache),hl
+    ld  a,c
+    ld  b,8
+    mlt bc
+    add hl,bc
+    ld  (ppu_fineYstartLoop_cache),hl
+    ;Adjusting jump targets for top side clip
+    ld  c,a
+    ld  b,21    ;20 bytes per segment
+    mlt bc
+    ld  hl,ppu_fineYstartLoop_jumptable+3
+    add hl,bc
+    ld  (ppu_fineYstartLoop_jumptable),hl
+    ;Adjusting restart value for top side clip
+    ld  c,a
+    ld  a,7
+    sub a,c
+    ld  (ppu_fineYstartLoop_restartbuf+1),a
+    ;Adjusting jump targets for bottom side clip
+    push bc
+        add a,-8+1
+        ld  c,a
+        ld  b,8
+        mlt bc
+        add hl,bc
+        ;ld  (ppu_fineYendLoop_cache),hl
+    pop bc
+    ld  a,7
+    sub a,c
+    ld  b,a     ;high byte offset
+    ld  c,9     ;low byte offset +1 to account for decrement below.
+    dec.s bc    ;clears BCU
+    ld  hl,(curScreenBuf)
+    add hl,bc
+    ld  sp,hl
+    ld  (ix+PPU_VCOUNT),29       ;INITIAL DEBUG VALUE. SET TO RIGHT VAL L8R.
+
+
+
+    ;ld  a,(ix+PPU_YSCROLL_FINE)
+    ;cp  a,7
+    ;jr  z,$
+    ;jr $
+    ld  hl,(ix+PPU_NAMETABLE_PTR)
+ppu_fineYVertLoop:
+    ld  (ix+PPU_HCOUNT),32
+ppu_fineYHorizLoop_top:
+    ld  a,(de)
+    exx
+    ld  c,a
+    ld  b,64
+    mlt bc
+ppu_fineYstartLoop_cache .equ $+2
+ppu_fineYmidLoop_cache .equ $+2
+ppu_fineYendLoop_cache .equ $+2
+    ld  iy,0
+    add iy,bc
+ppu_fineYstart_mask .equ $+1
+    ld  bc,0
+    ld  de,-256+8
+ppu_fineYstartLoop_jumptable .equ $+1
+    jp 0
+;-------------------------------------
+    ld  hl,(iy+64- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+56- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+48- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+40- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+32- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+24- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+16- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+    ld  hl,(iy+ 8- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ;sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+;-------------------------------------
+ppu_fineYstartLoop_restartbuf .equ $+1
+    ld  hl,(256*7)+16
+    add hl,sp
+    ld  sp,hl
+    exx
+    ;
+    ;Horizontal movement handling
+    ;
+    ld  a,e
+    inc e
+    xor a,e
+    bit 5,a     ;A carry in X would result in a change in bit 5
+    jr  z,+_    ;A jump here means that bit 5 didn't change. X still in range.
+    and a,%11100000     ;retain old Y values from A
+    xor a,e             ;keeping only the changes made in the low bits.
+    ld  c,a     ;And now let's squirrel this and...
+    ld  b,d     ;...D for later merge magic
+    ld  a,L
+    xor a,%00000100 ;flip to the next horizontal buffer...
+    ld  L,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor a,d         ;
+    and a,%00000011 ;write high bits of D, keeping old Y values
+    xor a,d
+    ld  d,a         ;and map coords into a new nametable
+_:  dec (ix+PPU_HCOUNT)
+    jr  z,+++_
+    ld  a,e
+    dec a
+    xor a,e     ;undo earlier increment to check for boundary crossings
+    bit 2,a     ;coarse adjust: new byte
+    jr  nz,+_
+    bit 1,a     ;fine adjust: choose new byte orientation
+    jr  nz,++_
+    jp  ppu_fineYHorizLoop_top
+_:  ;Coarse adjust: Obtain new byte
+    ld  c,e \ ld  b,d
+    ld  a,d
+    rra
+    srl e
+    rra
+    srl e       ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rlca
+    rlca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  (ix+PPU_ATTRIBUTE_CACHE),a    
+    ld  e,c \ ld  d,b
+_:  ;fine adjust: Move byte, then load to SMC
+    ld a,(ix+PPU_ATTRIBUTE_CACHE)
+    bit 6,e
+    jr  z,$+6
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+    bit 1,e
+    jr  nz,$+4  ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+    and a,%00001100
+    ld  (ppu_fineYstart_mask+0),a
+    ld  (ppu_fineYstart_mask+1),a
+    ld  (ppu_fineYstart_mask+2),a
+    jp ppu_fineYHorizLoop_top
+_:  ;
+    ;Vertical movement handling
+    ;
+    ld  a,e
+    add a,32    ;increment Y
+    ld  e,a
+    ld  a,d
+    adc a,0     ;increment next byte's Y
+    ld  d,a
+    rrca
+    rrca        ;......yy -> yy......
+    and a,e     ;merge two together top 4 bits of Y, leaving lowest bit alone.
+    and a,$C0   ;and clear off the remaining bits
+    cp  a,$C0   ;If all those bits were set, we went out of Y range (30,31)
+    jr  nz,+_   ;Jump if we didn't go out of range (any of the bits not set)
+    ld  a,L
+    xor a,%00001000 ;flip to next vertical buffer
+    ld  L,a         ;Resetting Y will not be needed.
+    xor a,a
+    ld  b,a
+    jr  ++_
+_:  ld  a,e
+    ld  b,d
+_:  ld  de,(hl)     ;Reset nametable
+    ld  e,(ix+PPU_XSCROLL_ROUGH)    ;reset X positions
+    xor a,e         ;A=oldyposition, E=reset X positions
+    and a,%11100000 ;write X position into A
+    xor a,e
+    ld  e,a         ;And copy completed into address
+    ld  a,b         ;A=oldyposition
+    xor a,d         ;A=oldyposition, D=address components
+    and a,%00000011 ;Write address components into A
+    xor a,d
+    ld  d,a         ;Nametable mapped.
+    exx
+    ld  a,7
+    ld  (ppu_fineYstartLoop_restartbuf+1),a
+    ld  hl,ppu_fineYstartLoop_jumptable+3
+    ld  (ppu_fineYstartLoop_jumptable),hl
+    ld  hl,(ppu_midHorizLoop_cachesmc)
+    ld  (ppu_fineYmidLoop_cache),hl
+    ;
+    ld  hl,256*7
+    add hl,sp
+    ld  sp,hl
+    exx
+    ;
+    ; Note: You'll want to add in some kind of attribute byte correction at
+    ; this stage to handle left columns at boundaries
+    ;
+    dec (ix+PPU_VCOUNT)
+    ld  a,(ix+PPU_VCOUNT)
+    cp  a,1
+    jr  nz,+_
+    ;jr  $
+    exx
+    ld  a,(ix+PPU_YSCROLL_FINE)
+    ld  hl,-1
+    add a,-9
+    ld  h,a
+    add hl,sp
+    inc hl
+    ld  sp,hl   ;readjust
+
+    ld  c,(ix+PPU_YSCROLL_FINE)
+    ld  a,8
+    sub a,c
+    ld  c,a
+    ld  b,21
+    mlt bc
+    ld  hl,ppu_fineYstartLoop_jumptable+3
+    add hl,bc
+    ld  (ppu_fineYstartLoop_jumptable),hl
+    ld  a,(ix+PPU_YSCROLL_FINE)
+    dec a
+    ld  (ppu_fineYstartLoop_restartbuf+1),a
+    exx
+    ;jp  ppu_drawFrameSuper_ending
+    xor a,a
+    inc a
+_:  or  a,a
+    jp  nz,ppu_fineYVertLoop
+    ;The final iteration will render all the bottoms.
+    jp  ppu_drawFrameSuper_ending
+
+
+
+
+ppu_drawFrameSuper_fineAllScrolling:
+    jp  ppu_drawFrameSuper_ending
+
+
 
 
 
