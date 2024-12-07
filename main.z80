@@ -270,7 +270,7 @@ drawFrameLoop:
     call ppu_drawFrameSuper
     call getkbd_adl
     push af
-        ;call waituntilkeyrelease
+        call waituntilkeyrelease
     pop af
     ld  ix,$D03280
     lea hl,ix+PPU_YSCROLL
@@ -282,7 +282,7 @@ drawFrameLoop:
     and a,%00000111
     jr  nz,+_
     ld  a,(hl)
-    add a,1 ; add a,8
+    add a,8 ;1 ; add a,8
     cp  a,$F0  ;bottom of screen
     jr  c,+_-1
     push af
@@ -298,7 +298,7 @@ _:  bit kbitUp,e
     and a,%00000111
     jr  nz,+_
     ld  a,(hl)
-    sub a,1 ;sub a,8
+    sub a,8 ;1 ;sub a,8
     jr  nc,+_-1
     push af
         ld  a,(ix+PPU_CTRL)
@@ -313,9 +313,9 @@ _:  bit kbitLeft,e
     and a,%00000111
     jr  nz,+_
     ld  a,(bc)
-    sub a,8
+    sub a,1 ; 8
     ld  (bc),a
-    jr  nc,$+10
+    jr  nc,+_
     ld  a,(ix+PPU_CTRL)
     xor a,%00000001
     ld  (ix+PPU_CTRL),a
@@ -325,9 +325,9 @@ _:  bit kbitRight,e
     and a,%00000111
     jr  nz,+_
     ld  a,(bc)
-    add a,8
+    add a,1 ;8
     ld  (bc),a
-    jr  nc,$+10
+    jr  nc,+_
     ld  a,(ix+PPU_CTRL)
     xor a,%00000001
     ld  (ix+PPU_CTRL),a
