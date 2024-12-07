@@ -112,10 +112,11 @@ INT_CYCLE_OFFSET    .equ 3
 ;
 ;
 
-ppuScreenBuf1       .equ vRam
-ppuScreenBuf2       .equ ppuScreenBuf1+(256*224)
-chr_rom_1_cache     .equ ppuScreenBuf2+(256*224)
-chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)
+ppuScreenBuf1       .equ vRam                       ;+$000000
+ppuScreenBuf2       .equ ppuScreenBuf1+(256*224)    ;+$00E000
+chr_rom_1_cache     .equ ppuScreenBuf2+(256*224)    ;+$01C000
+chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
+;EOM: $25800
 
 
 ;

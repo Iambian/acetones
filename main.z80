@@ -247,6 +247,28 @@ _:  nop
     ld  de,vram_palette
     ld  bc,32
     ldir
+
+    ld  b,0
+_:  ld  hl,NAMETABLE1+((7*32)+8)
+    ld  a,b
+    and a,%00001111
+    ld  c,a ;xpos
+    ld  a,b
+    and a,%11110000
+    ld  e,a
+    ld  d,2 ;e already mult by 16 by position. mult 2 more for x32
+    mlt de
+    ld  a,c
+    add a,e
+    ld  e,a
+    add hl,de
+    ld  (hl),b
+    djnz -_
+
+
+
+
+
     
     ;set registers
     ld  (ix+PPU_XSCROLL),0*8      ;PPU_SCROLL is write-only. Data gets...
