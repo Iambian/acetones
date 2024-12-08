@@ -923,7 +923,7 @@ ppu_drawFrameSuper_fineXScrolling:
         ld  a,e
         ld  (ppu_fineXHorizLoop_resetbufright),a
         ;
-        ld  a,25
+        ld  a,28
         ld  (ix+PPU_VCOUNT),a
     pop de
     ;Sets up screen buffer
@@ -1168,7 +1168,10 @@ ppu_fineXHorizLoop_bufskipright .equ $+1
     exx     ;TO: Loop
     ;jr $
 ppu_fineXHorizLoop_resetbufright .equ $+1
-    ld  de,0    ; = X. We are already at the correct height.
+    ld  de,-1    ; = X. We are already at the correct height.
+    ;ABOVE COMMENT IS A LIAR. IT'S ACTUALLY... I... DON'T KNOW.
+    ;CHANGING 0 to -1 BASED ON THE IDEA THAT IT NEEDED TO GO BACK
+    ;UP ONE ROW SEEMED TO WORK BUT I HAVE NO FIRM IDEA WHY.
     add hl,de
     ld  sp,hl
     exx     ;TO: Normal

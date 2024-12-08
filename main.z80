@@ -292,7 +292,7 @@ drawFrameLoop:
     call ppu_drawFrameSuper
     call getkbd_adl
     push af
-        call waituntilkeyrelease
+        ;call waituntilkeyrelease
     pop af
     ld  ix,$D03280
     lea hl,ix+PPU_YSCROLL
