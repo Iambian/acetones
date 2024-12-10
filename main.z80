@@ -302,9 +302,9 @@ drawFrameLoop:
     jr  z,+_
     ld  a,(bc)
     and a,%00000111
-    jr  nz,+_
+    ;jr  nz,+_
     ld  a,(hl)
-    add a,8 ;1 ; add a,8
+    add a,1 ; add a,8
     cp  a,$F0  ;bottom of screen
     jr  c,+_-1
     push af
@@ -318,9 +318,9 @@ _:  bit kbitUp,e
     jr  z,+_
     ld  a,(bc)
     and a,%00000111
-    jr  nz,+_
+    ;jr  nz,+_
     ld  a,(hl)
-    sub a,8 ;1 ;sub a,8
+    sub a,1 ;sub a,8
     jr  nc,+_-1
     push af
         ld  a,(ix+PPU_CTRL)
@@ -333,7 +333,7 @@ _:  bit kbitLeft,e
     jr  z,+_
     ld  a,(hl)
     and a,%00000111
-    jr  nz,+_
+    ;jr  nz,+_
     ld  a,(bc)
     sub a,1 ; 8
     ld  (bc),a
@@ -345,7 +345,7 @@ _:  bit kbitRight,e
     jr  z,+_    
     ld  a,(hl)
     and a,%00000111
-    jr  nz,+_
+    ;jr  nz,+_
     ld  a,(bc)
     add a,1 ;8
     ld  (bc),a
