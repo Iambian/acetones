@@ -1236,30 +1236,33 @@ ppu_drawFrameSuper_fineAllScrolling:
     ;TESTING CODE IS ABOVE THIS LINE
     ;REMOVE THE CODE ABOVE WHEN DONE TESTING
 
-
-    ;ld a,(ix+PPU_XSCROLL_FINE)
-    ;cp 7
-    ;jr z,$
-    ld a, (ix+PPU_XSCROLL_ROUGH)
-    or a,a
-    ;jr  nz,$
+    ;NOTE: The code below will be modified and extended to support starting
+    ;Y-position as well. Compare this to ppu_drawFrameSuper_fineXScrolling
+    ;for cacheing middle-of-screen values
+    ld  bc,(ix+PPU_XSCROLL_FINE)    ;c=xscrollfine, b=yscrollfine
     push de
         ; Configure initial mask settings
         ld  a,(ppu_midHorizLoop_masksmc)
         ld  (ppu_fineAllHorizLoop_maskleft),a
-        ; Adjusting pointers to cache
+        ; Adjusting pointers to sprite cache
         ld  hl,(ppu_midHorizLoop_cachesmc)  ;recall midloop cache
+        ld  e,b     ;|
+        ld  d,8     ;| Code added to 
+        mlt de      ;| adjust for initial Y
+        add hl,de   ;|
         ld  (ppu_fineAllmidLoop_cache),hl
         ;ld  hl,(chr_rom_tiles)              ;nonadjusted tiles cache
+        ;Note: Since HL was taken as-is, presume that the adjusted
+        ;HL for verticality is also correct.
         ld  (ppu_fineAllHorizLoop_cacheright),hl      ;init = +0
         ex  de,hl   ;cache address in DE. Going to use HL to build offset
         or  a,a
         sbc hl,hl
-        ld  L,(ix+PPU_XSCROLL_FINE)
+        ld  L,c     ;Scroll X fine in HL
         add hl,de
         ld  (ppu_fineAllHorizLoop_cacheleft),hl   ;init = +X
         ; Adjusting jump targets for right and left side clipping
-        ld  a,(ix+PPU_XSCROLL_FINE)    ;values 1-7
+        ld  a,c     ;values 1-7
         dec a
         ld  e,a
         add a,a     ;x2
@@ -1278,6 +1281,23 @@ ppu_drawFrameSuper_fineAllScrolling:
         add a,d
         ;add a,2
         ld  (ppu_fineAllHorizLoop_loopright),a
+        ;Adjust loop limits for topleft and topright iteration
+        ld  a,7
+        sub a,b
+        ld  (ppu_fineAllHorizLoop_maskleft+1),a     ;loop rolled into mask MSB
+        ld  (ppu_fineAllHorizLoop_maskright+1),a    ;Also rolled into mask MSB
+        ;Adjust jump targets for top side center clip
+        ld  e,b
+        ld  d,21
+        mlt de
+        ld  hl,ppu_fineAllmidLoop_jumptable+3
+        add hl,de
+        ld  (ppu_fineAllmidLoop_jumptable),hl
+        ;Adjust restart value for top middle side clip
+        ld  a,7
+        sub a,b
+        ld  (ppu_fineAllmidtLoop_restartbuf+1),a
+        ;Restart value for top-left side clip does not require special attention
         ; Adjusting skip values
         ld  a,(ix+PPU_XSCROLL_FINE)
         ld  e,a
@@ -1492,9 +1512,8 @@ _:  ld  a,(ppu_fineAllmidLoop_mask)
     ld  (ppu_fineAllHorizLoop_maskright),a
 ppu_fineAllHorizLoop_right:
     ld  a,(de)
-    ld  b,8
 ppu_fineAllHorizLoop_maskright .equ $+1
-    ld  c,0
+    ld  bc,$000800
     exx     ;TO:Loop
     ld  b,a
     ld  c,64
