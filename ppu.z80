@@ -435,7 +435,7 @@ ppu_debug_first_byte_in_nametable:
     ld  de,($F20000)
     ld  a,d
     or  a,a     ;Framerate too large to bother calculating. Or far too small.
-    jp  z,ppu_noframerate
+    jp  z,ppu_noframerateSuper
     ld  ($F20000),hl
     ld  hl,32768
     xor a,a
@@ -1282,7 +1282,7 @@ ppu_drawFrameSuper_fineAllScrolling:
         ;add a,2
         ld  (ppu_fineAllHorizLoop_loopright),a
         ;Adjust loop limits for topleft and topright iteration
-        ld  a,7
+        ld  a,8
         sub a,b
         ld  (ppu_fineAllHorizLoop_maskleft+1),a     ;loop rolled into mask MSB
         ld  (ppu_fineAllHorizLoop_maskright+1),a    ;Also rolled into mask MSB
@@ -1297,6 +1297,10 @@ ppu_drawFrameSuper_fineAllScrolling:
         ld  a,7
         sub a,b
         ld  (ppu_fineAllmidtLoop_restartbuf+1),a
+        ;Middle-to-top-right screen buffer adjust
+        ld  a,-8
+        add a,b
+        ld  (ppu_fineAllHorizLoop_bufptrinit+1),a
         ;Restart value for top-left side clip does not require special attention
         ; Adjusting skip values
         ld  a,(ix+PPU_XSCROLL_FINE)
@@ -1316,7 +1320,7 @@ ppu_drawFrameSuper_fineAllScrolling:
         ld  a,e
         ld  (ppu_fineAllHorizLoop_resetbufright),a
         ;
-        ld  a,3
+        ld  a,5     ;TESTING VALUE ******* CHANGE TO Y-SCROLL VALUE LATER
         ld  (ix+PPU_VCOUNT),a
     pop de
     ;Sets up screen buffer
@@ -1522,6 +1526,7 @@ ppu_fineAllHorizLoop_cacheright .equ $+1
     ld  hl,0
     add hl,bc
     ex  de,hl
+ppu_fineAllHorizLoop_bufptrinit .equ $+1
     ld  hl,-((256*7)+8)
     add hl,sp   ;HL=buf DE=spr
     ld  b,0
@@ -1660,17 +1665,32 @@ _:  ld  de,(hl)     ;Reset nametable
     and a,%00000011 ;Write address components into A
     xor a,d
     ld  d,a         ;Nametable mapped.
-    exx
-    ;ld  a,7
-    ;ld  (ppu_fineYstartLoop_restartbuf+1),a
-    ;ld  hl,ppu_fineYstartLoop_jumptable+3
-    ;ld  (ppu_fineYstartLoop_jumptable),hl
-    ;ld  hl,(ppu_midHorizLoop_cachesmc)
-    ;ld  (ppu_fineYmidLoop_cache),hl
     ;
-    ;ld  hl,256*7
-    ;add hl,sp
-    ;ld  sp,hl
+    ; This section here sets and reaffirm the vertical center of the screen.
+    ; If you can figure out how to cheaply exclude this section AFTER it
+    ; gets run exactly once, do that.
+    ;
+    exx
+    ld  hl,-((256*7)+8)
+    ld  (ppu_fineAllHorizLoop_bufptrinit),hl
+    ld  bc,(ix+PPU_XSCROLL_FINE)
+    ld  hl,(ppu_midHorizLoop_cachesmc)  ;recall midloop cache
+    ld  (ppu_fineAllmidLoop_cache),hl
+    ld  (ppu_fineAllHorizLoop_cacheright),hl      ;init = +0
+    ex  de,hl   ;cache address in DE. Going to use HL to build offset
+    or  a,a
+    sbc hl,hl
+    ld  L,c     ;Scroll X fine in HL
+    add hl,de
+    ld  (ppu_fineAllHorizLoop_cacheleft),hl   ;init = +X
+    ;-- left sprite buffer wasn't changed wrt dY
+    ld  a,8
+    ld  (ppu_fineAllHorizLoop_maskleft+1),a     ;loop rolled into mask MSB
+    ld  (ppu_fineAllHorizLoop_maskright+1),a    ;Also rolled into mask MSB
+    ld  a,7
+    ld  (ppu_fineAllmidtLoop_restartbuf+1),a
+    ld  hl,ppu_fineAllmidLoop_jumptable+3         ;roll back the jump target
+    ld  (ppu_fineAllmidLoop_jumptable),hl
     exx
     ;
     ; Note: You'll want to add in some kind of attribute byte correction at
@@ -1750,7 +1770,7 @@ ppu_isr:
 _:  ;there... should be something else to do?
     ;call ppu_drawBGSprites
     push iy
-        call ppu_drawFrame
+        call ppu_drawFrameSuper
     pop iy
     ;call ppu_drawFGSprites
 ppu_isr_nodraw:
@@ -1786,251 +1806,15 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     jp  inst6502_brk
 
 
+;==============================================================================
+;
+; Note: Old background renderer was removed. As of this writing, the improved
+; background renderer is nearly ready for deployment for games that do not
+; use sprite zero collision tricks. A sprite renderer still needs to be made.
+;
+;==============================================================================
 
 
-
-
-ppu_drawFrame:
-    ;set base rom addresses
-    ld  hl,(chr_rom_base)
-    ld  bc,$001000
-    ld  a,(ix+PPU_CTRL)
-    push hl
-        bit 4,a     ;background pattern base offset
-        jr  z,+_
-        add hl,bc
-_:      ld  (chr_rom_tiles),hl
-    pop hl
-    bit 5,a     ;sprite pattern base offset
-    jr  z,+_
-    add hl,bc
-_:  ld  (chr_rom_sprites),hl
-    ;set coarse x,y scroll positions. B=Y, C=x
-    ld  bc,(ix+PPU_XSCROLL)
-    sra b
-    sra b
-    sra b
-    sra c
-    sra c
-    sra c
-    ld  (ix+PPU_XSCROLL_ROUGH),c
-    ;set base nametable addresses
-    ld  hl,nametable00
-    ld  a,(ix+PPU_CTRL)
-    and a,3
-    add a,a
-    add a,a
-    ld  L,a
-    ld  (ix+PPU_NAMETABLE_PTR),hl   ;yeah. let's cache this so we don't lose it
-    ;In-place setting of nametable address wrt X,Y
-    ;%------YY YYYXXXXX
-    ld  de,(hl)
-    ld  a,b     ;Set lower 3 bits of Y into new E.
-    rrca
-    rrca
-    rrca
-    ld  b,a     ;keep this for now. Bit pattern YYY---YY.
-    xor a,c
-    and a,%11100000 ;Write X into low 5 bits of address, retaining Y.
-    xor a,c
-    ld  e,a         ;Low byte of address formed.
-    ld  a,b         ;A has high Y bits
-    xor a,d         ;merging address...
-    and a,%00000011 ;Write address into A, keeping Y bits
-    xor a,d
-    ld  d,a
-    ;Fetch first attribute byte from address
-    ;%------YY YYYXXXXX -> %------11 11YYYXXX
-    push de
-        ld  a,d
-        rra
-        srl e
-        rra
-        srl e       ;YYYYYXXX
-        set 0,d
-        set 1,d
-        ld  a,e
-        rlca
-        rlca
-        or  a,%11000000
-        xor a,e
-        and a,%11111000
-        xor a,e
-        ld  e,a
-        ld  a,(de)
-    pop de
-    ;Selects attribute from A from B=Y, C=X in format %0000AA00
-    ;Let's instead use DE %------yy yYyxxxXx y: e6, x: e1
-    bit 6,e
-    jr  z,+_
-    rlca    ;If not zero, shift upper nibble into lower nibble
-    rlca    ;for further selection.
-    rlca
-    rlca
-_:  bit 1,e
-    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
-    rlca        ;Otherwise, move them into position
-    rlca        
-_:  and a,%00001100
-
-
-
-
-    ld  (ppu_mainTileLoop_attribute_write),a
-
-    ld  (ix+PPU_VCOUNT),29      ;first row processed, do not draw last row
-    ld  iy,(curScreenBuf)
-    ;lea iy,iy+32
-    jp  ppu_FirstRowDrawSkip    ;remove first row.
-ppu_verticalLoop:
-    ld  (ix+PPU_HCOUNT),32
-ppu_horizontalLoop:
-    ld  a,(de)
-    push hl
-        push de
-            ld  hl,(chr_rom_tiles)
-            ld  c,a
-            ld  b,16
-            mlt bc
-            add hl,bc
-            ld  (ix+PPU_TCOUNT),8
-            lea de,iy+0
-ppu_mainTileLoop:
-            ld  a,(hl)
-            ld  bc,8
-            add hl,bc
-            ld  b,(hl)
-            ld  c,a
-            push hl
-                ld  hl,vram_palette
-ppu_mainTileLoop_attribute_write    .equ $+1
-                ld  a,0
-                ;Attrib to LSB of VRAM_PALETTE, shift CHR_ROM data to LSB to
-                ;form full address+offset. Copy from palette to buffer.
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;1/8 12b apiece
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;2/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;3/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;4/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;5/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;6/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;7/8
-                ld  L,a \ sla b \ rl  L \ sla c \ rl  L \ inc c \ ldi   ;8/8 96b tot
-                ld  hl,256-8
-                add hl,de
-                ex  de,hl   ;screen ptr in DE. Advanced to next row
-            pop hl
-            ld  bc,-7
-            add hl,bc
-            dec (ix+PPU_TCOUNT)
-            jr  nz,ppu_mainTileLoop
-            ;start wrapping up the horizontal loop
-        pop de
-    pop hl      ;HL= pointer to nametable mapping block
-    ld  a,e
-    inc e
-    xor a,e
-    bit 5,a     ;A carry in X would result in a change in bit 5
-    jr  z,+_    ;A jump here means that bit 5 didn't change. X still in range.
-    and a,%11100000     ;retain old Y values from A
-    xor a,e             ;keeping only the changes made in the low bits.
-    ld  c,a     ;And now let's squirrel this and...
-    ld  b,d     ;...D for later merge magic
-    ld  a,L
-    xor a,%00000100 ;flip to the next horizontal buffer...
-    ld  L,a
-    ld  de,(hl)
-    ld  e,c
-    ld  a,b
-    xor a,d         ;
-    and a,%00000011 ;write high bits of D, keeping old Y values
-    xor a,d
-    ld  d,a         ;and map coords into a new nametable
-_:  lea iy,iy+8     ;next position on the buffer.
-    dec (ix+PPU_HCOUNT)
-    jp  nz,ppu_horizontalLoop
-    ;the X buffer *will* have changed at some point and rolled around
-    ;so there's no need to deal with X. Still gotta do Y first...
-    ld  bc,(256*7)+0
-    add iy,bc       ;move cursor pointer to the next row
-    ld  a,L         ;Flip back to previous horizontal buffer since this was
-    xor a,%00000100 ;most definitely changed by the time we end the row draw.
-    ld  L,a         ;Resetting X position will come later.
-ppu_FirstRowDrawSkip:
-    ld  a,e
-    add a,32    ;increment Y
-    ld  e,a
-    ld  a,d
-    adc a,0     ;increment next byte's Y
-    ld  d,a
-    rrca
-    rrca        ;......yy -> yy......
-    and a,e     ;merge two together top 4 bits of Y, leaving lowest bit alone.
-    and a,$C0   ;and clear off the remaining bits
-    cp  a,$C0   ;If all those bits were set, we went out of Y range (30,31)
-    jr  nz,+_   ;Jump if we didn't go out of range (any of the bits not set)
-    ld  a,L
-    xor a,%00001000 ;flip to next vertical buffer
-    ld  L,a         ;Resetting Y will not be needed.
-    xor a,a
-    ld  b,a
-    jr  ++_
-_:  ld  a,e
-    ld  b,d
-_:  ld  de,(hl)     ;Reset nametable
-    ld  e,(ix+PPU_XSCROLL_ROUGH)    ;reset X positions
-    xor a,e         ;A=oldyposition, E=reset X positions
-    and a,%11100000 ;write X position into A
-    xor a,e
-    ld  e,a         ;And copy completed into address
-    ld  a,b         ;A=oldyposition
-    xor a,d         ;A=oldyposition, D=address components
-    and a,%00000011 ;Write address components into A
-    xor a,d
-    ld  d,a         ;Nametable mapped.
-    dec (ix+PPU_VCOUNT)
-    jp  nz,ppu_verticalLoop
-
-
-
-
-;The following is a framecounter. Mask out if needed.
-    call newPage
-    ld  a,(ix+PPU_FRAMECOUNT)
-    call printFrameCounterPair
-    ;call skipSpace
-    xor a,a
-    sbc hl,hl
-    ld  de,($F20000)
-    ld  a,d
-    or  a,a     ;Framerate too large to bother calculating. Or far too small.
-    jr  z,ppu_noframerate
-    ld  ($F20000),hl
-    ld  hl,32768
-    xor a,a
-_:  inc a
-    sbc hl,de
-    jr  nc,-_
-    dec a
-    or  a,a ;clears necessary flags
-    daa
-    push de
-        call printFrameCounterPair
-        ;call skipSpace
-    pop de
-    xor a,a
-    ld  e,d
-    ld  d,a
-    ld  hl,32768/256*100
-_:  inc a
-    sbc hl,de
-    jr  nc,-_
-    dec a
-    or  a,a ;clears necessary flags
-    daa
-    call printFrameCounterPair
-ppu_noframerate:
-    call ppuBufSwap
-    ret
 
 ;TODO: Test changes to the PPU and link together something in the mapper
 ;to perform controls. Also. Those freakin' interrupts. DO THEM.
