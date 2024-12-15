@@ -292,7 +292,7 @@ drawFrameLoop:
     call ppu_drawFrameSuper
     call getkbd_adl
     push af
-        call waituntilkeyrelease
+        ;call waituntilkeyrelease
     pop af
     ld  ix,$D03280
     lea hl,ix+PPU_YSCROLL
@@ -958,6 +958,13 @@ mapper0_apu_stop_keyboard:
     xor a,c
     and a,%11110000
     xor a,c     ;keymapping has changed. We need to further alter it.
+    ;===========================================================================
+    ;
+    ; TODO: CHANGE BELOW TO USE PAGE-ALIGNED LOOKUP TABLE TO ACCELERATE THIS.
+    ; NOTE: The algorithm below works perfectly. Is suitable for LUT generation
+    ;
+    ;===========================================================================
+    ;
     ;[DE MO 2N Y= UP RI LE DO] maps to [SE, B, A, ST, UP, RI, LE, DO]
     ;The above must be rearranged to become:
     ;            [RI, LE, DO, UP, ST, SE, B , A ]

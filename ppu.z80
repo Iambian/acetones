@@ -718,7 +718,7 @@ _:  ld  de,(hl)     ;Reset nametable
     ;
     dec (ix+PPU_VCOUNT)
     ld  a,(ix+PPU_VCOUNT)
-    cp  a,1
+        cp  a,1
     jr  nz,+_
     ;jr  $
     exx
@@ -1241,6 +1241,9 @@ ppu_drawFrameSuper_fineAllScrolling:
     ;for cacheing middle-of-screen values
     ld  bc,(ix+PPU_XSCROLL_FINE)    ;c=xscrollfine, b=yscrollfine
     push de
+        ; Turn on run-once code
+        xor a,a
+        ld  (ppu_fineAllHoriz_topToMidReinitSMC),a
         ; Configure initial mask settings
         ld  a,(ppu_midHorizLoop_masksmc)
         ld  (ppu_fineAllHorizLoop_maskleft),a
@@ -1320,7 +1323,7 @@ ppu_drawFrameSuper_fineAllScrolling:
         ld  a,e
         ld  (ppu_fineAllHorizLoop_resetbufright),a
         ;
-        ld  a,5     ;TESTING VALUE ******* CHANGE TO Y-SCROLL VALUE LATER
+        ld  a,29
         ld  (ix+PPU_VCOUNT),a
     pop de
     ;Sets up screen buffer
@@ -1670,6 +1673,9 @@ _:  ld  de,(hl)     ;Reset nametable
     ; If you can figure out how to cheaply exclude this section AFTER it
     ; gets run exactly once, do that.
     ;
+ppu_fineAllHoriz_topToMidReinitSMC .equ $+1
+    jr  ppu_fineAllHoriz_topToMidReinitSkip
+ppu_fineAllHoriz_topToMidReinitStart:
     exx
     ld  hl,-((256*7)+8)
     ld  (ppu_fineAllHorizLoop_bufptrinit),hl
@@ -1691,17 +1697,54 @@ _:  ld  de,(hl)     ;Reset nametable
     ld  (ppu_fineAllmidtLoop_restartbuf+1),a
     ld  hl,ppu_fineAllmidLoop_jumptable+3         ;roll back the jump target
     ld  (ppu_fineAllmidLoop_jumptable),hl
+    ;Turn off run-once code
+    ld  a,ppu_fineAllHoriz_topToMidReinitSkip-ppu_fineAllHoriz_topToMidReinitStart
+    ld  (ppu_fineAllHoriz_topToMidReinitSMC),a
     exx
+ppu_fineAllHoriz_topToMidReinitSkip:
     ;
     ; Note: You'll want to add in some kind of attribute byte correction at
     ; this stage to handle left columns at boundaries
     ;
     dec (ix+PPU_VCOUNT)
+    ld  a,(ix+PPU_VCOUNT)
+    cp  a,1     ;A is required to be kept intact in case of A=0
+    jr  nz,ppu_fineAll_skipAdjustLastRow
+    exx
     ;
     ; Codeblock removed was for adjusting Y parameters for fine Y scrolling.
     ; When you copy and paste this whole shebang back in for the combined
     ; X/Y routine, this is where you'll reinsert that code.
     ;
+    ; Screen buffer adjustments will be unnecessary. On either side.
+    ;
+    ld  c,(ix+PPU_YSCROLL_FINE)
+    ld  a,c
+    ld  (ppu_fineAllHorizLoop_maskleft+1),a     ;loop rolled into mask MSB
+    ld  (ppu_fineAllHorizLoop_maskright+1),a    ;Also rolled into mask MSB
+    ;
+    neg
+    ld  (ppu_fineAllHorizLoop_bufptrinit+1),a
+    ;
+    ld  a,8
+    sub a,c
+    ld  c,a
+    ld  b,21
+    mlt bc
+    ld  hl,ppu_fineAllmidLoop_jumptable+3
+    add hl,bc
+    ld  (ppu_fineAllmidLoop_jumptable),hl
+    ld  a,(ix+PPU_YSCROLL_FINE)
+    dec a
+    ld  (ppu_fineAllmidtLoop_restartbuf+1),a
+    ;
+    ;
+    ;
+    xor a,a
+    inc a
+    exx
+ppu_fineAll_skipAdjustLastRow:
+    or  a,a
     jp  nz,ppu_fineAllVertLoop
     ;The final iteration will render all the bottoms.
     jp  ppu_drawFrameSuper_ending
