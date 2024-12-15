@@ -2803,13 +2803,23 @@ inst6502_bvs:
 ;interrupt,             N	Z	C	I	D	V
 ;push PC+2, push SR     -	-	-	1	-	-
 ;implied	BRK	00	1	7  
+inst6502_brk_from_handler:
+    ;This is jumped to from an interrupt handler. The difference is that
+    ;instead of jumping over the BRK instruction, this hops backwards to
+    ;undo the partial fetch that the interrupt occurred on.
+    ADDCYC(7)
+    ld  hl,STACKBASE
+    ld  L,(ix+REGSP)
+    ld.s de,(ix+REGPC)
+    dec de
+    jr  +_
 inst6502_brk:
     ADDCYC(7)
     ld  hl,STACKBASE
     ld  L,(ix+REGSP)
     ld.s de,(ix+REGPC)
     inc de      ;that extra spacer.
-    ld  (hl),d
+_:  ld  (hl),d
     dec L
     ld  (hl),e
     dec L
@@ -2886,9 +2896,10 @@ _:  ld  h,(hl)
     or  a,a
     sbc hl,de   ;infinite loop detection
     ld.s (ix+REGPC),de
-    jr  z,inst6052_jmp_abs_inf_loop
+    jr  z,inst6052_jmp_abs_inf_loop_orig
     ADDCYC(3)
     jp i6502FirstLoad
+inst6052_jmp_abs_inf_loop_orig:
 
 inst6052_jmp_abs_inf_loop:
     lea bc,iy+0

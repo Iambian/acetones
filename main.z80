@@ -139,6 +139,7 @@ _:      ld  a,(hl)
     call int6502_init
     call ppu_init
     call i6502Init
+    ;jr $
 
     ;===========================================================================
     ;===========================================================================
@@ -1009,23 +1010,25 @@ _:  cp  a,$14   ;OAM DMA
 _:  ld  (hl),b
     ret
 mapper0_ppu_write:
-    ret
+    ret     ;SMC-gated
     ;TODO: gate off access outside VBlank
     ;TODO: Replace cp/jr chain with DJNZ chain for more optimal branching.
     ld  a,c
     and a,%00000111
-;    cp  a,$01  ;Once midframe is supported, uncomment this.
-;    jr  z,mapper0_ppu_write_ppumask
+    jr  z,mapper0_ppu_write_ppuctrl
+    cp  a,$01  ;Once midframe is supported, uncomment this.
+    jr  z,mapper0_ppu_write_ppumask
     cp  a,$02
     ret z   ;read-only register. do not write to it.
     cp  a,$04
     jr  z,mapper0_ppu_write_oamdata
-    cp a,$06
+    cp  a,$06
     jr  z,mapper0_ppu_write_ppuaddr
     cp  a,$07
     jr  z,mapper0_ppu_write_ppudata
-;    cp  a,$05  ;Once midframe is supported, uncomment this.
-;    jr  z,mapper0_ppu_write_ppuscroll
+    cp  a,$05  ;Once midframe is supported, uncomment this.
+    jr  z,mapper0_ppu_write_ppuscroll
+
 
 
 mapper0_ppu_write_oamdata:
@@ -1072,18 +1075,25 @@ _:  add a,(ix+PPU_V)
 _:  ret
 _:  ld  hl,vram_palette
     ld  a,(ix+PPU_V+0)
-    and a,%00111111
+    inc (ix+PPU_V+0)    ;nobody would ever inc 32 on a palette write.
+    and a,%00011111
     ld  L,a
     ld  (hl),b
     ret
 
+mapper0_ppu_write_ppuctrl:
+    ld  (ix+PPU_CTRL),b
+    ret
+
 mapper0_ppu_write_ppumask:
     ;TODO: Allow queueing for midframe writes.
+    ld  (ix+PPU_MASK),b
     ld  (hl),b
     ret
 mapper0_ppu_write_ppuscroll:
     ;TODO: Allow queueing for midframe writes. Often used in conjunction
     ;with Sprite0 hits for status bar rendering.
+    ld  (ix+PPU_SCROLL),b
     ld  (hl),b
     ret
 

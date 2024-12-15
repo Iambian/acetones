@@ -189,14 +189,14 @@ _:  ld  b,a
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -339,14 +339,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -411,10 +411,43 @@ _:  ld  de,(hl)     ;Reset nametable
     ld  hl,256*7
     add hl,sp
     ld  sp,hl
-    ;
-    ; Note: You'll want to add in some kind of attribute byte correction at
-    ; this stage to handle left columns at boundaries
-    ;
+    ;Fetch first attribute byte from address
+    ;%------YY YYYXXXXX -> %------11 11YYYXXX
+    ld  c,e \ ld  b,d
+    ld  a,d
+    rra
+    rr e
+    rra
+    rr e       ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rrca
+    rrca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  (ix+PPU_ATTRIBUTE_CACHE),a
+    ld  e,c \ ld  d,b
+    ;Selects attribute from A bitpacked DE = %------yy yYyxxxXx y: e6, x: e1
+    ;into the format %0000AA00
+    bit 6,e
+    jr  z,+_
+    rlca    ;If not zero, shift upper nibble into lower nibble
+    rlca    ;for further selection.
+    rlca
+    rlca
+_:  bit 1,e
+    jr  nz,+_   ;If not zero, upper 2 bits of lower nibble already in position
+    rlca        ;Otherwise, move them into position
+    rlca        
+_:  and a,%00001100
+    ld  (ppu_midHorizLoop_masksmc+0),a
+    ld  (ppu_midHorizLoop_masksmc+1),a
+    ld  (ppu_midHorizLoop_masksmc+2),a
     dec (ix+PPU_VCOUNT)
     jp  nz,ppu_midVertLoop
 ppu_drawFrameSuper_ending:
@@ -633,14 +666,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -975,14 +1008,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -1094,14 +1127,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -1482,14 +1515,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -1601,14 +1634,14 @@ _:  ;Coarse adjust: Obtain new byte
     ld  c,e \ ld  b,d
     ld  a,d
     rra
-    srl e
+    rr e
     rra
-    srl e       ;YYYYYXXX
+    rr e       ;YYYYYXXX
     set 0,d
     set 1,d
     ld  a,e
-    rlca
-    rlca
+    rrca
+    rrca
     or  a,%11000000
     xor a,e
     and a,%11111000
@@ -1811,11 +1844,11 @@ ppu_isr:
     jr  nc,+_
     dec (ix+PPU_SUBCYCLE)
 _:  ;there... should be something else to do?
-    ;call ppu_drawBGSprites
     push iy
+        ;call ppu_drawBGSprites
         call ppu_drawFrameSuper
+        ;call ppu_drawFGSprites
     pop iy
-    ;call ppu_drawFGSprites
 ppu_isr_nodraw:
     inc (ix+PPU_FRAMECOUNT)
     ld  bc,27939
@@ -1846,7 +1879,7 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     jp  z,i6502RetryFirstLoad
     ld  a,$FF
     ld  (ix+NMI_TRIGGERED),a
-    jp  inst6502_brk
+    jp  inst6502_brk_from_handler
 
 
 ;==============================================================================
