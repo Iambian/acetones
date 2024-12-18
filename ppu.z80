@@ -1786,13 +1786,204 @@ ppu_fineAll_skipAdjustLastRow:
 
 
 
+;Requires that ppu_drawFrameSuper is called prior to this to set up pointers. 
+;This will later be merged into the frame draw.
+ppu_drawFGSprites:
+    ld  (ppu_drawFGSprites_saveSP),sp
+    ld  iy,OBJECT_ATTRIB_MEM+(256-4)
+    ld  (ix+PPU_TCOUNT),64      ;64 sprites
+ppu_drawFGSpritesLoop:
+    bit OAM_PRIORITY,(iy+OAM_ATTRIBUTES)
+    ;jp  nz,ppu_drawFGSpritesLoop_skipRender  ;FP: do not draw BP sprites.
+    xor a,a
+    ld  (ix+TEMP_MEMORY),a      ;Sprite pointer adjust (in bytes, wrt Y pos)
+    ld  a,(ix+PPU_CTRL)     ;16x8mode bit in 5th spot, labeled as "SPRITE_SIZE"
+    rrca
+    rrca
+    and a,8
+    ld  c,a                 ;0=8x8mode, 8=16x8mode
+    ld  a,(iy+OAM_YPOS)
+    ld  b,a
+    sub a,8
+    jr  nc,ppu_drawFGSprites_skipTopClip
+    ld  a,b
+    add a,a
+    add a,a
+    add a,a     ;x8 for sprite width adjust
+    ld  (ix+TEMP_MEMORY),a
+    ld  a,b
+    cpl
+    add a,9     ;If the initial result was exactly 8, then we went out of
+    and a,7     ;and we need to consider this a full clip, but add 16x8 mode
+    add a,c     ;to see if it stays that way.
+    jp  z,ppu_drawFGSpritesLoop_skipRender  ;
+    ld  (ppu_drawFGSpritesLoop_vLoopCountSMC),a
+    ld  b,8     ;Fixes screen-Y position to 0 as we are top-clipping, pre-adj.
+    jr  ppu_drawFGSpritesLoop_vClipFinish
+ppu_drawFGSprites_skipTopClip:
+    ld  a,224
+    sub a,c     ;adjust for possible 16x8 mode
+    cp  a,b
+    jr  nc,ppu_drawFGSprites_skipBtmClip
+    cpl
+    add a,232+1
+    ld  (ppu_drawFGSpritesLoop_vLoopCountSMC),a
+    jp  ppu_drawFGSpritesLoop_vClipFinish
+ppu_drawFGSprites_skipBtmClip:
+    ld  a,8
+    add a,c
+    ld  (ppu_drawFGSpritesLoop_vLoopCountSMC),a
+ppu_drawFGSpritesLoop_vClipFinish:
+    ;B=preserved Y value. Need to -8 to adjust to actual screen.
+    ;C can be discarded.
+    ld  e,8     ;X-slop for not clipped values. Used in skip calc further below
+    ld  a,256-8
+    ld  (ppu_drawFGSpritesLoop_nextScreenLineSMC),a
+    ld  a,(iy+OAM_XPOS)
+    sub a,248+1
+    jr  nc,ppu_drawFGSpritesLoop_skipRightClip
+    ld  (ppu_drawFGSpritesLoop_nextScreenLineSMC),a
+    neg
+    ld  e,a ;X-slop for clipped values. Used in skip calc below
+    ;
+    ;Perform multiply of A by size of pixel draw code
+    ;It is important that the math that is performed here
+    ;clears the carry flag, else the HL init will not be correct.
+    ;
+    ;FP: 5-wide
+    ld  c,a ;[1,2,3,4,5,6,7,*]
+    add a,a
+    add a,a
+    add a,c ;x5
+ppu_drawFGSpritesLoop_skipRightClip:
+    sbc hl,hl       ;Ensures all bits of HL are cleared, including HLU.
+    ld  h,b         ;MSB (Y)
+    ld  L,a         ;LSB (X)
+    ld  bc,(curScreenBuf)
+    add hl,bc       ;This resets carry, unless something went horribly wrong
+    ld  sp,hl       ;SP=screenbuf
+    ;
+    ;The stuff below are calculations pertaining to the sprite pointer
+    ;and (further) modifications to the render loop.
+    ;
+    ;NOTE: The stuff below is threading two different calculations together,
+    ;       tied by H/VFLIP split. A for sprite skip, and HL for sprite
+    ;       pointer offset to be added to sprite pointer (later) for init ptr.
+    ;
+    sbc hl,hl       ;clears out HL to have zeroed sprite offset
+    ld  a,e         ;preserved X-slop.
+    neg
+    add a,8
+    ;operations are not commutative. HFLIP must be tested first.
+    ld  c,(iy+OAM_ATTRIBUTES)
+    bit OAM_HFLIP,c
+    jr  z,+_
+    ld  L,7     ;horizontally-flipped sprite puts offset at right edge of sprite
+    neg
+_:  bit OAM_VFLIP,c
+    jr  z,+_
+    ld  b,a     ;preserve A during calculations
+    ld  a,(ix+PPU_CTRL)     ;16x8mode bit in 5th spot, labeled as "SPRITE_SIZE"
+    rrca
+    rrca
+    ld  d,8
+    and a,d
+    add a,7                 ;7=8x8mode, 15=16x8mode
+    ld  e,a
+    mlt de      ;vert-flip offset
+    add hl,de
+    ld  b,a     ;restores A to continue spriteskip calculations
+    sub a,16
+_:  ld  (ppu_drawFGSpritesLoop_spriteOffsetSMC),hl
+    ld  b,a
+    add a,a     ;sign extension
+    sbc hl,hl
+    ld  L,b
+    ld  (ppu_drawFGSpritesLoop_nextSpriteLineSMC),hl
+    ;Modifying unrolled loop contents for sprite increment vs decrement
+    ;inc de = $13, dec de = $1B
+    ld  a,$13   ;inc de
+    bit OAM_HFLIP,c
+    jr  z,+_
+    ld  a,$1B   ;dec de
+_:  ld  de,5        ;5 = FP STRIDE. CHANGE THIS TO 9 FOR BP STRIDE
+    ld  hl,ppu_drawFGSpritesLoop_hJumpTargetSMC+1+4
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ld  (hl),a \ add hl,de
+    ;find sprite location.
+    ;NOTE: Is possible that bank selection is done mid-frame. If that happens
+    ;       we're SOL. Doing that won't be possible without different paradigm.
+    ;       Or heavy modifications
+    ld  c,(iy+OAM_INDEX)
+    ld  b,64
+    ld  hl,(chr_rom_tiles)
+    bit PPU_CTRL_SPRITE_SIZE,(ix+PPU_CTRL)
+    jr  z,ppu_drawFGSpritesLoop_shortSprite
+    ld  hl,chr_rom_1_cache
+    rrc c
+    rlc b
+ppu_drawFGSpritesLoop_shortSprite:
+    mlt bc
+    add hl,bc
+ppu_drawFGSpritesLoop_spriteOffsetSMC .equ $+1
+    ld  de,0    ;sprite offset, to add to sprite
+    add hl,de   ;sprite pointer established
+    ;
+    ld  a,(iy+OAM_ATTRIBUTES)
+    and a,%00000011
+    or  a,%00010000
+    ld  (ppu_drawFGSpritesLoop_attribMask),a
+    ;Since we aren't going to support left side clipping, there's no need
+    ;to deal with adjusting starting X wrt sprite. Stop thinking about it.
+    ;Seriously.
+    ex  de,hl
+    sbc hl,hl
+    add hl,sp
+    ;The SMC code below is near loop init.
+ppu_drawFGSpritesLoop_attribMask    .equ $+1
+ppu_drawFGSpritesLoop_vLoopCountSMC .equ $+2
+    ld  bc,0
+ppu_drawFGSpritesLoop_hJumpTargetSMC .equ $+1
+    jr  $+2
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de   ;5-wide
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  sp,hl       ;screen buffer storage
+ppu_drawFGSpritesLoop_nextSpriteLineSMC .equ $+1
+    ld  hl,0
+    add hl,de
+    ex  de,hl
+ppu_drawFGSpritesLoop_nextScreenLineSMC .equ $+1
+    ld  hl,256-8
+    add hl,sp
+    djnz ppu_drawFGSpritesLoop_hJumpTargetSMC-1
+ppu_drawFGSpritesLoop_skipRender:
+    lea iy,iy-4
+    dec (ix+PPU_TCOUNT)
+    jp  nz,ppu_drawFGSpritesLoop
+ppu_drawFGSprites_saveSP .equ $+1
+    ld  sp,0
+    ret
+
+
 
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ;    ***   *** ***** *   *  ***  *          *** ***** *   * ***** *****
 ;   *   * *      *   *   * *   * *         *      *   *   * *     *    
 ;   ***** *      *   *   * ***** *          ***   *   *   * ***   ***  
 ;   *   * *      *   *   * *   * *             *  *   *   * *     *    
-;   *   *  ***   *    ***  *   * *****      ***   *    ***  *     *    
+;   *   *  ***   *    ***  *   * *****      ***   *    ***  *     *    l
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -1845,9 +2036,9 @@ ppu_isr:
     dec (ix+PPU_SUBCYCLE)
 _:  ;there... should be something else to do?
     push iy
-        ;call ppu_drawBGSprites
         call ppu_drawFrameSuper
-        ;call ppu_drawFGSprites
+        ;call ppu_drawBGSprites
+        call ppu_drawFGSprites
     pop iy
 ppu_isr_nodraw:
     inc (ix+PPU_FRAMECOUNT)

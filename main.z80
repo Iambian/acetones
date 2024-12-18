@@ -266,16 +266,17 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
     ld  (hl),b
     djnz -_
 
-
-
-
-
-    
     ;set registers
     ld  (ix+PPU_XSCROLL),(0*8)+1      ;PPU_SCROLL is write-only. Data gets...
     ld  (ix+PPU_YSCROLL),(0*8)+0      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10001000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.
+    ;init first sprite
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  (hl),$10    \ inc hl    ;ypos
+    ld  (hl),'L'    \ inc hl    ;id
+    ld  (hl),2      \ inc hl    ;attribs
+    ld  (hl),$10                ;xpos
 
     ;jr $
 ;kbitDown	equ 00h
@@ -290,70 +291,31 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
 
 drawFrameLoop:
     ;Note: Not changing base this time around. For next time
+    ld  ix,$D03280
     call ppu_drawFrameSuper
+    call ppu_drawFGSprites
     call getkbd_adl
     push af
         ;call waituntilkeyrelease
     pop af
-    ld  ix,$D03280
-    lea hl,ix+PPU_YSCROLL
-    lea bc,ix+PPU_XSCROLL
+    ld  iy,OBJECT_ATTRIB_MEM
     ld  e,a
     bit kbitDown,e
     jr  z,+_
-    ld  a,(bc)
-    and a,%00000111
-    ;jr  nz,+_
-    ld  a,(hl)
-    add a,1 ; add a,8
-    cp  a,$F0  ;bottom of screen
-    jr  c,+_-1
-    push af
-        ld  a,(ix+PPU_CTRL)
-        xor a,%00000010
-        ld  (ix+PPU_CTRL),a
-    pop af
-    add a,$10
-    ld  (hl),a
+    res OAM_VFLIP,(iy+OAM_ATTRIBUTES)
+    inc (iy+OAM_YPOS)
 _:  bit kbitUp,e
     jr  z,+_
-    ld  a,(bc)
-    and a,%00000111
-    ;jr  nz,+_
-    ld  a,(hl)
-    sub a,1 ;sub a,8
-    jr  nc,+_-1
-    push af
-        ld  a,(ix+PPU_CTRL)
-        xor a,%00000010
-        ld  (ix+PPU_CTRL),a
-    pop af
-    sub a,$10
-    ld  (hl),a
+    set OAM_VFLIP,(iy+OAM_ATTRIBUTES)
+    dec (iy+OAM_YPOS)
 _:  bit kbitLeft,e
     jr  z,+_
-    ld  a,(hl)
-    and a,%00000111
-    ;jr  nz,+_
-    ld  a,(bc)
-    sub a,1 ; 8
-    ld  (bc),a
-    jr  nc,+_
-    ld  a,(ix+PPU_CTRL)
-    xor a,%00000001
-    ld  (ix+PPU_CTRL),a
+    res OAM_HFLIP,(iy+OAM_ATTRIBUTES)
+    dec (iy+OAM_XPOS)
 _:  bit kbitRight,e
-    jr  z,+_    
-    ld  a,(hl)
-    and a,%00000111
-    ;jr  nz,+_
-    ld  a,(bc)
-    add a,1 ;8
-    ld  (bc),a
-    jr  nc,+_
-    ld  a,(ix+PPU_CTRL)
-    xor a,%00000001
-    ld  (ix+PPU_CTRL),a
+    jr  z,+_
+    set OAM_HFLIP,(iy+OAM_ATTRIBUTES)
+    inc (iy+OAM_XPOS)
 _:  ld  a,e
     and a,(1<<kbitMode)+(1<<kbit2nd)+(1<<kbitDel)+(1<<kbitYequ)
     jp  z,drawFrameLoop

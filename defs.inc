@@ -178,6 +178,35 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
 #define SF_INT 2
 #define SF_ZERO 1
 #define SF_CARRY 0
+;
+;
+;PPU_CTRL flag bits
+PPU_CTRL_BASE_NAMETABLE     .equ 0
+PPU_CTRL_VRAM_INCREMENT     .equ 2
+PPU_CTRL_BASE_SPRITETABLE   .equ 3
+PPU_CTRL_BASE_BGTABLE       .equ 4
+PPU_CTRL_SPRITE_SIZE        .equ 5
+PPU_CTRL_MASTER_SLAVE_SELECT .equ 6
+PPU_CTRL_VBLANK_NMI_ENABLE  .equ 7
+;PPU_MASK flag bits
+PPU_MASK_GREYSCALE          .equ 0
+PPU_MASK_SHOW_LEFT_BG       .equ 1
+PPU_MASK_SHOW_LEFT_SPRITES  .equ 2
+PPU_MASK_RENDER_BG          .equ 3
+PPU_MASK_RENDER_SPRITES     .equ 4
+PPU_MASK_EMPHASIS_RED       .equ 5
+PPU_MASK_EMPHASIS_GREEN     .equ 6
+PPU_MASK_EMPHASIS_BLUE      .equ 7
+;OBJECT ATTRIBUTE TABLE OFFSET BYTES AND BITS
+OAM_YPOS        .equ 0
+OAM_INDEX       .equ 1
+OAM_ATTRIBUTES  .equ 2
+OAM_XPOS        .equ 3
+OAM_PALETTE     .equ 0
+OAM_PRIORITY    .equ 5
+OAM_HFLIP       .equ 6
+OAM_VFLIP       .equ 7
+
 
 #macro ADDCYC(X)
     #if (x < 1)
