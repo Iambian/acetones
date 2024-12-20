@@ -267,7 +267,7 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
     djnz -_
 
     ;set registers
-    ld  (ix+PPU_XSCROLL),(0*8)+1      ;PPU_SCROLL is write-only. Data gets...
+    ld  (ix+PPU_XSCROLL),(0*8)+0      ;PPU_SCROLL is write-only. Data gets...
     ld  (ix+PPU_YSCROLL),(0*8)+0      ;... deposited into these two registers.
     ld  (ix+PPU_CTRL),%10101000 ;NMI on, 1PPU, 8x8, BG0k, SP1k, VRC horiz, BNA00
     ld  (ix+PPU_MASK),%00011110 ;0emph, draw BG/spr, draw BG/spr left, no gs.

@@ -1963,6 +1963,7 @@ ppu_drawFGSpritesLoop:
     ;jp  nz,ppu_drawFGSpritesLoop_skipRender ;FP: do not draw BP sprites.
     ;B=Y. Determine if the sprite hasn't gone past the bottom of the screen.
     ld  b,(iy+OAM_YPOS)
+    inc b   ;"Sprite data is delayed by one scanline."
     ld  a,240-8-1 ;not drawing bottom 8 pixels. -1 for carry
     cp  a,b
     jp  c,ppu_drawFGSpritesLoop_skipRender
