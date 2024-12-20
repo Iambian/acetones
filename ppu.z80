@@ -1960,7 +1960,7 @@ ppu_drawFGSprites:
 ppu_drawFGSpritesLoop:
     ;Skip rendering if sprite priority does not match what we're drawing.
     bit OAM_PRIORITY,(iy+OAM_ATTRIBUTES)
-    jp  nz,ppu_drawFGSpritesLoop_skipRender ;FP: do not draw BP sprites.
+    ;jp  nz,ppu_drawFGSpritesLoop_skipRender ;FP: do not draw BP sprites.
     ;B=Y. Determine if the sprite hasn't gone past the bottom of the screen.
     ld  b,(iy+OAM_YPOS)
     ld  a,240-8-1 ;not drawing bottom 8 pixels. -1 for carry
@@ -1993,6 +1993,9 @@ ppu_drawFGSpritesLoop:
     ;   The Y value has to be fixed to the top of the screen, though.
     ld  a,8
     sub a,b
+    add a,a
+    add a,a
+    add a,a     ;x8 because tiles are 8 pixels wide.
     ld  (ix+TEMP_MEMORY),a
     ld  a,b
     add a,c
@@ -2006,7 +2009,6 @@ _:  ;Determine if sprite is partially off the bottom of the screen. In addition
     sub a,c     ;adjust for 16x8 mode.
     sub a,b
     jr  nc,+_
-    
     ;   Clipping: Only the vdraw loop value has to be shortened, since we're
     ;   still going to draw from the start of the sprite.
     ;   We don't have to fix Y.
@@ -2019,12 +2021,32 @@ _:  ;There is no clipping to be done. Fix vloop to the full 8x8 or 16x8 range.
     add a,c
     ld  (ppu_drawFGSpritesLoop_vLoopCountSMC),a
 ppu_drawFGSpritesLoop_endVertTest:
+    ;Testing if we need to perform right-clipping.
+    ld  c,(iy+OAM_XPOS)
+    ld  a,256-8
+    sub a,c     ;PIVOT-ACTUAL. Carry if need the clipping
+    jr  nc,+_
+    ;   Clipping: Received values [-1,-2,-3,..] need the following values:
+    ;   8*[1,2,3,..] for ppu_drawFGSpritesLoop_hJumpTargetSMC
+    ;   [1,2,3,..] for BASE VALUE of ppu_drawFGSpritesLoop_nextSpriteLineSMC
+    ;   [249,250,251,..] for ppu_drawFGSpritesLoop_nextScreenLineSMC
+    neg
+    ld  (ppu_drawFGSpritesLoop_nextSpriteLineSMC),a
+    ld  e,a
+    add a,a
+    add a,a
+    add a,a
+    ld  (ppu_drawFGSpritesLoop_hJumpTargetSMC),a
+    ld  a,e
+    add a,248
+    ld  (ppu_drawFGSpritesLoop_nextScreenLineSMC),a
+_:  ;Prepare and establish screen buffer pointer.
     or  a,a
     sbc hl,hl   ;clear out HLU
     ld  a,b
     sub a,8
     ld  h,a
-    ld  L,(IY+OAM_XPOS)
+    ld  L,c
     ld  bc,(curScreenBuf)
     add hl,bc
     ld  sp,hl
@@ -2034,7 +2056,7 @@ ppu_drawFGSpritesLoop_endVertTest:
     bit OAM_HFLIP,(IY+OAM_ATTRIBUTES)
     jr  z,+_
     ld  a,$1B   ;dec de
-_:  ld  de,9
+_:  ld  de,8
     ld  hl,ppu_drawFGSpritesLoop_hJumpTargetSMC
     ld  b,8
 _:  add hl,de
@@ -2061,10 +2083,73 @@ _:  add hl,de
 ppu_drawFGSpritesLoop_shortSprite:
     mlt bc
     add hl,bc
-    ;
-    ;At this point. HL=spritebase, SP=screenbuf(topleft)
-    ;Instead of doing offset below, you could calculate the offset here.
-    ;
+    ;Set up a few things to perform offset and next-sprite-line calculations
+    ;Add some 16x8 magic to the mix.
+    ld  a,(ix+PPU_CTRL)
+    rlca
+    and a,64
+    ld  b,a
+    ld  c,(IY+OAM_ATTRIBUTES)
+    ld  a,(ix+TEMP_MEMORY)
+    bit OAM_HFLIP,c
+    jr  nz,+_
+    ;   Sprite remains as-is horizontally.
+    bit OAM_VFLIP,c
+    jr  z,ppu_drawFGSpritesLoop_flipFinish
+    ;   Sprite has only vertically flipped. Sprite offset must start at the
+    ;   bottom-left, so negate existing vertical offset and add (64-8)
+    ;   Existing value in ppu_drawFGSpritesLoop_nextSpriteLineSMC wrt x-clip
+    ;   has to have -16 added to it to make the cursor go up, not down, per row.
+    neg
+    add a,64-8
+    add a,b
+    ex  de,hl
+    ld  bc,-16
+    ld  hl,(ppu_drawFGSpritesLoop_nextSpriteLineSMC)
+    add hl,bc
+    ld  (ppu_drawFGSpritesLoop_nextSpriteLineSMC),hl
+    ex  de,hl
+    jr  ppu_drawFGSpritesLoop_flipFinish
+_:  ;   Sprite has been horizontally flipped.
+    bit OAM_VFLIP,c
+    jr  nz,+_
+    ;   Sprite has only horizontally flipped. Sprite offset is simply on the
+    ;   other side of the sprite (+7). Sprite traversal already handled.
+    ;   ppu_drawFGSpritesLoop_nextSpriteLineSMC needs to be negated to reach
+    ;   backwards to previous row, but havd 16 added to it to instead hit next.
+    add a,7
+    ex  de,hl
+    or  a,a
+    ld  hl,16
+    ld  bc,(ppu_drawFGSpritesLoop_nextSpriteLineSMC)
+    sbc hl,bc
+    ld  (ppu_drawFGSpritesLoop_nextSpriteLineSMC),hl
+    ex  de,hl
+    jr  ppu_drawFGSpritesLoop_flipFinish
+_:  ;   Sprite has been both horizontally and vertically flipped.
+    ;   Sprite offset is a fine combination of the above stuff.
+    ;   Negate, then add (64-8) to reach the row. Then add 7 to reach column.
+    ;   ppu_drawFGSpritesLoop_nextSpriteLineSMC needs to be negated to reach
+    ;   backwards to previous row. Nothing else is needed since that's the
+    ;   direction we're headed to already.
+    neg
+    add a,(64-8)+7
+    add a,b
+    ex  de,hl
+    or  a,a
+    sbc hl,hl
+    ld  bc,(ppu_drawFGSpritesLoop_nextSpriteLineSMC)
+    sbc hl,bc
+    ld  (ppu_drawFGSpritesLoop_nextSpriteLineSMC),hl
+    ex  de,hl
+ppu_drawFGSpritesLoop_flipFinish:
+    ld  bc,0
+    ld  c,a
+    add hl,bc
+
+    ld  bc,64   ;kludge. fix later.
+    add hl,bc
+
     ex  de,hl
     sbc hl,hl
     add hl,sp
@@ -2074,14 +2159,14 @@ ppu_drawFGSpritesLoop_vLoopCountSMC .equ $+2
     ld  bc,0
 ppu_drawFGSpritesLoop_hJumpTargetSMC .equ $+1
     jr  $+2
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de   ;9-wide
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
-    ld  a,(de) \ and a,3 \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de   ;8-wide
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld  a,(de) \ or a,a \ jr z,$+4 \ or a,c \ ld (hl),a \ inc hl \ inc de
     ld  sp,hl       ;screen buffer storage
 ppu_drawFGSpritesLoop_nextSpriteLineSMC .equ $+1
     ld  hl,0
@@ -2098,7 +2183,6 @@ ppu_drawFGSpritesLoop_skipRender:
 ppu_drawFGSprites_saveSP .equ $+1
     ld  sp,0
     ret
-
 #ifdef PRINT_PPU_SUBROUTINE_SIZES
 .echo "DrawFGSprites size: ", $ - ppu_drawFGSprites
 #endif

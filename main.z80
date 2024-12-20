@@ -275,7 +275,7 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
     ;init first sprite
     ld  hl,OBJECT_ATTRIB_MEM
     ld  (hl),$10        \ inc hl    ;ypos
-    ld  (hl),'L'        \ inc hl    ;id
+    ld  (hl),'c'        \ inc hl    ;id
     ld  (hl),%00000011  \ inc hl    ;attribs
     ld  (hl),$10                ;xpos
 
@@ -306,22 +306,22 @@ drawFrameLoop:
     ld  e,a
     bit kbitDown,e
     jr  z,+_
-    ;res OAM_VFLIP,(iy+OAM_ATTRIBUTES)
+    res OAM_VFLIP,(iy+OAM_ATTRIBUTES)
     inc (iy+OAM_YPOS)
 ;    inc (iy+OAM_YPOS)
 _:  bit kbitUp,e
     jr  z,+_
-    ;set OAM_VFLIP,(iy+OAM_ATTRIBUTES)
+    set OAM_VFLIP,(iy+OAM_ATTRIBUTES)
     dec (iy+OAM_YPOS)
 ;    dec (iy+OAM_YPOS)
 _:  bit kbitLeft,e
     jr  z,+_
-    ;res OAM_HFLIP,(iy+OAM_ATTRIBUTES)
+    set OAM_HFLIP,(iy+OAM_ATTRIBUTES)
     dec (iy+OAM_XPOS)
 ;    dec (iy+OAM_XPOS)
 _:  bit kbitRight,e
     jr  z,+_
-    ;set OAM_HFLIP,(iy+OAM_ATTRIBUTES)
+    res OAM_HFLIP,(iy+OAM_ATTRIBUTES)
     inc (iy+OAM_XPOS)
 ;    inc (iy+OAM_XPOS)
 _:  ld  a,e
@@ -969,8 +969,10 @@ _:  cp  a,$14   ;OAM DMA
             ld  de,513  ;or 514. Not going to emulate put/get cycles
             add iy,de
             ld  c,BASETABLE_STRIDE
+            mlt bc
             ld  hl,PAGETABLE
             add hl,bc
+            ld  hl,(hl)
             ld  de,OBJECT_ATTRIB_MEM
             ld  bc,256
             ldir
@@ -990,6 +992,8 @@ mapper0_ppu_write:
     jr  z,mapper0_ppu_write_ppumask
     cp  a,$02
     ret z   ;read-only register. do not write to it.
+    cp  a,$03
+    jr  z,mapper0_ppu_write_oamaddr
     cp  a,$04
     jr  z,mapper0_ppu_write_oamdata
     cp  a,$06
@@ -999,14 +1003,10 @@ mapper0_ppu_write:
     cp  a,$05  ;Once midframe is supported, uncomment this.
     jr  z,mapper0_ppu_write_ppuscroll
 
-
-
-mapper0_ppu_write_oamdata:
-    ;Doesn't check anything. So sad.
-    ld  hl,OBJECT_ATTRIB_MEM
-    ld  L,(ix+PPU_OAMADDR)
-    ld  (hl),b
+mapper0_ppu_write_oamaddr:
+    ld  (ix+PPU_OAMADDR),b
     ret
+
 mapper0_ppu_write_ppuaddr:
     rrc (ix+PPU_W)
     jr  c,+_
@@ -1064,6 +1064,14 @@ mapper0_ppu_write_ppuscroll:
     ;TODO: Allow queueing for midframe writes. Often used in conjunction
     ;with Sprite0 hits for status bar rendering.
     ld  (ix+PPU_SCROLL),b
+    ld  (hl),b
+    ret
+
+mapper0_ppu_write_oamdata:
+    ;Doesn't check anything. So sad.
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  L,(ix+PPU_OAMADDR)
+    inc (ix+PPU_OAMADDR)
     ld  (hl),b
     ret
 
