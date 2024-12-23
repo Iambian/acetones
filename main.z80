@@ -775,9 +775,13 @@ _:  ld  de,(hl)
     ;value must be recalculated from chr_rom_base
     ld  hl,(chr_rom_base)
     ld  (chr_rom_curbank),hl
-    ld  hl,mapper0_ppu_write
+    ld  hl,mapper0_ppu_write+1
     ld  (ppu_smc_gate),hl
-    ld  (hl),$C9    ;ret. Will write nop here during first NMI handle
+    ld  (hl),JR_OPERAND(mapper0_ppu_write, mapper0_ppu_smc_return)
+    ld  a,JR_OPERAND(mapper0_ppu_write, mapper0_ppu_write_ports)
+    ld  (ppu_smc_gate_ports),a
+    ld  a,JR_OPERAND(mapper0_ppu_write, mapper0_ppu_write_stack)
+    ld  (ppu_smc_gate_stack),a
     ret
 
 
@@ -804,6 +808,10 @@ mapper0_apu_read:
     rr  (ix+APU_KEYPAD)     ;after bits are exhausted, should read '1'
     adc a,$40               ;Simulate open bus behavior
     ret
+_:  cp  a,$17
+    jr  nz,+_
+    xor a,a     ;No controller connected to second port.
+    ret
 _:  ld  a,(hl)  ;hope that the dummy map page is good enough to not crash.
     ret
 mapper0_ppu_read:
@@ -827,15 +835,10 @@ mapper0_ppu_read_ppustatus:
     ;reading ppustatus does additional things.
     ld  a,WREG_CONST
     ld  (ix+PPU_W),a
+    ld  (ix+PPU_W_RESET),a
     lea hl,ix+PPU_STATUS
     ld  a,(hl)
-    res 7,(hl)  ;clears VBlank flag if it was set. But only after read.
-    ;!!! NOTE:
-    ; In the future, sprite 0 hit flag is set in a generated "interrupt" event
-    ; created by another "interrupt" event that the PPU ISR generates. The PPU
-    ; event triggers at the end VBlank, clearing the sprite 0 flag and creating
-    ; the sprite 0 hit event flag, where it is set. But only if sprite 0 can
-    ; be hit.
+    res PPU_STATUS_VBLANK_TRIGGERED,(hl)
     ret
 mapper0_ppu_read_ppudata:
     ld  a,(ix+PPU_V+1)
@@ -906,7 +909,7 @@ _:  cp  a,$40
     ret
 mapper0_apu_write:
     ld  a,c
-    cp  a,$16
+    cp  a,IO_CONTROLLER1_ADR
     jr  nz,+_
     ld  a,(ix+APU_KEYLATCH)
     xor a,b     ;Bit 0 is set if we're trying to change controller poll state.
@@ -962,7 +965,7 @@ mapper0_apu_stop_keyboard:
     xor a,d     ;Merge-in contains b5-7. Is complete.
     ld  (ix+APU_KEYPAD),a
     ret
-_:  cp  a,$14   ;OAM DMA
+_:  cp  a,APU_OAMDMA_ADR
     jr  nz,+_
     push bc
         push de
@@ -980,41 +983,85 @@ _:  cp  a,$14   ;OAM DMA
     pop bc
     ret
 _:  ld  (hl),b
+mapper0_ppu_smc_return:
     ret
+
+
+
 mapper0_ppu_write:
-    ret     ;SMC-gated
-    ;TODO: gate off access outside VBlank
-    ;TODO: Replace cp/jr chain with DJNZ chain for more optimal branching.
+    jr  $   ;THIS GETS SMC'D ALL OVER THE PLACE.
+mapper0_ppu_write_stack:
     ld  a,c
     and a,%00000111
-    jr  z,mapper0_ppu_write_ppuctrl
-    cp  a,$01  ;Once midframe is supported, uncomment this.
-    jr  z,mapper0_ppu_write_ppumask
+    ld  c,a
+    cp  a,PPU_ADDR_ADR
+    jr  z,+_
+    cp  a,PPU_SCROLL_ADR
+    jr  nz,++_
+_:  ld  a,(ix+PPU_W_RESET)
+    rlca
+    jr  nc,+_
+    ld  (ix+PPU_W_RESET),a
+    ld  d,c
+    ld  c,a ;bit7 will be set if there was a reset
+    push.s iy   ;B is junk. C bit 7 being set indicates that a W register
+    push.s bc   ;reset happened between pushed data/scroll writes.
+    ld  c,d
+_:  push.s iy
+    push.s bc
+    ret
+
+mapper0_ppu_write_ports:
+    ld  a,c
+    and a,%00000111
+    ld  c,a
+    add a,(core_memory_ix+PPU_CTRL)&$FF
+    ld  L,a
+    ld  a,c
     cp  a,$02
     ret z   ;read-only register. do not write to it.
-    cp  a,$03
-    jr  z,mapper0_ppu_write_oamaddr
     cp  a,$04
     jr  z,mapper0_ppu_write_oamdata
+    cp  a,$05
+    jr  z,mapper0_ppu_write_ppuscroll
     cp  a,$06
     jr  z,mapper0_ppu_write_ppuaddr
     cp  a,$07
     jr  z,mapper0_ppu_write_ppudata
-    cp  a,$05  ;Once midframe is supported, uncomment this.
-    jr  z,mapper0_ppu_write_ppuscroll
 
-mapper0_ppu_write_oamaddr:
-    ld  (ix+PPU_OAMADDR),b
+;Fallthrough: Registers CTRL(0), MASK(1), and OAMADDR(3)
+mapper0_ppu_regwrite:
+    ld  (hl),b
     ret
 
+;register OAMDATA(4)
+mapper0_ppu_write_oamdata:
+    ;Doesn't check anything. So sad.
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  L,(ix+PPU_OAMADDR)
+    inc (ix+PPU_OAMADDR)
+    ld  (hl),b
+    ret
+
+;register SCROLL(5)
+mapper0_ppu_write_ppuscroll:
+    rrc (ix+PPU_W)
+    jr  c,+_
+    ld  (ix+PPU_YSCROLL),b  ;second write
+    ret
+_:  ld  (ix+PPU_XSCROLL),b  ;first write
+    ret
+
+;register ADDR(6)
 mapper0_ppu_write_ppuaddr:
     rrc (ix+PPU_W)
     jr  c,+_
-    ld  (ix+PPU_V+0),b
+    ld  (ix+PPU_V+0),b  ;second write
     ret
-_:  ld  (ix+PPU_V+1),b
+_:  ld  (ix+PPU_V+1),b  ;first write
     ret
 
+;register DATA(7)
 mapper0_ppu_write_ppudata:
     ld  a,(ix+PPU_V+1)
     ld  c,a
@@ -1051,29 +1098,8 @@ _:  ld  hl,vram_palette
     ld  (hl),b
     ret
 
-mapper0_ppu_write_ppuctrl:
-    ld  (ix+PPU_CTRL),b
-    ret
 
-mapper0_ppu_write_ppumask:
-    ;TODO: Allow queueing for midframe writes.
-    ld  (ix+PPU_MASK),b
-    ld  (hl),b
-    ret
-mapper0_ppu_write_ppuscroll:
-    ;TODO: Allow queueing for midframe writes. Often used in conjunction
-    ;with Sprite0 hits for status bar rendering.
-    ld  (ix+PPU_SCROLL),b
-    ld  (hl),b
-    ret
 
-mapper0_ppu_write_oamdata:
-    ;Doesn't check anything. So sad.
-    ld  hl,OBJECT_ATTRIB_MEM
-    ld  L,(ix+PPU_OAMADDR)
-    inc (ix+PPU_OAMADDR)
-    ld  (hl),b
-    ret
 
 
 loadROMFile_tempSig:    ;total 23 bytes

@@ -42,43 +42,45 @@
 ;mappings are program-dependant. Only $0000-$3FFF will be mapped in here
 ;more or less because I don't expect anything else to map that.
 i6502Init:
-    ;
-    ; At this point, you may need to randomize 2048 bytes at main_ram
-    ;
+    ;TODO: Randomize 2048 bytes at main_ram to simulate power-on state.
+    ;NOTE: Some games rely on this for state of randomness (e.g. FF1)
+    ;Mirror 32 pages of 8 page of main_ram starting at logical page $00
     ld  hl,main_ram
     ld  bc,$002008
     ld  e,$00
+    ;Mirror 32 pages of 1 page of ppu registers starting at logical page $20
+    ;NOTE: To not corrupt memory, WRITE_ACCESS at PPU registers must mask out
+    ;upper 5 bits before adding offset. Offset will not exceed page bounds.
     call i6502_map_pages
-    ld  hl,scrap_mapping
+    ld  hl,core_memory_ix+PPU_CTRL
     ld  bc,$002001
     ld  e,$20
     call i6502_map_pages
+    ;All other mappings are handled beforehand via mapper selected at ROM load.
+    ;Fill out the instruction set.
     call i6502_load_instruction_set
-    ;
+    ;Zero out CPU registers and work memory. PPU init is done separately.
     ld  ix,core_memory_ix
-    ld  iy,8    ;8 cycle startup. Hooking into inst6502_jsr for init
     lea hl,ix
     lea de,ix+1
     ld  bc,126
     ld  (hl),$00
     ldir
-    ;
+    ;Quick establish quick exit vector
     ld  hl,0
     add hl,sp
     ld  (ix+CORE_STACK_BASE),hl
-    ;
+    ;Initialize register state as if RESET vector had been taken
+    ld  iy,8
     ld  (ix+REGSP),$FD  ;init does a BRK-like action without the actual pushes.
     ld  (ix+REGSR),$24  ;Presumably, this is what status register starts with?
-    ld  hl,PAGETABLE+(255*BASETABLE_STRIDE)
-    ld  hl,(hl)
-    ld  de,$0000FC
+    ld  hl,(PAGETABLE+(255*BASETABLE_STRIDE))
+    ld  de,$0000FC  ;Offset to RESET vector ($FE=IRQ, $FA=NMI)
     add hl,de
-    ld  hl,(hl) ;get RST vector
+    ld  hl,(hl)     ;HL now points to byte at vector.
     ld.s (ix+REGPC),hl
-    ;-- debug stuff. Timer things.
-    ld  a,($F20030)
-    set 0,a ;turn on timer 1
-    ld  ($F20030),a
+    ;-- DEBUGGING - ENABLE TIMER 0
+    ld  hl,$F20030  \ set 0,(hl)
     ; Core initialized. Begin fetching instructions
     jr  i6502FirstLoad
 
@@ -223,6 +225,7 @@ i6502_take_interrupt:
     xor a,a
     ld  (ix+REGPC+0),e
     ld  hl,(INT_TABLE)  ;Find the routines in "coreint.z80" that handles
+    jr $    ;###################################################################
     jp  (hl)            ;and maintains the interrupt table being used here.
 
 

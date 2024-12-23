@@ -2231,27 +2231,36 @@ ppu_init:
 
 ;Some bits of this is in "coreint.z80"
 ppu_isr:
+    ;TODO: Copy PPU register memory to IX space, modify ppu_mapper to write
+    ;to that memory where possible; elsewhere where not.
+    ;OR. WHY NOT JUST SET THE COMMON MEMORY MAPPER PPU AREA TO MAP DIRECTLY
+    ;TO THE MEMORY THAT IX POINTS TO? WE DO BOUNDS CHECKING ANYHOW...
+    ;AS A SIDE-EFFECT, THIS WILL SHORTEN THE PPU_MAPPER ROUTINE. AND MAYBE
+    ;MAKE IT RUN FASTER.
     ld  a,($F00020)
     and a,%0000001
     jp  nz,endCurrentRun    ;stop execution when ON key is pressed
 
-    ld  a,(ix+PPU_CTRL)
-    and a,%00011000     ;sprite and background. if zero, no rendering happens.
-    ;jr  z,ppu_isr_nodraw
-    ;perform the check that makes odd cycles one ppu cc shorter, but only if
-    ;something is being rendered to the screen
+    ld  a,(ix+PPU_MASK)
+    and a,(1<<PPU_MASK_RENDER_BG)|(1<<PPU_MASK_RENDER_SPRITES)
+    jr  z,ppu_isr_nodraw
     ld  a,(ix+PPU_FRAMECOUNT)
     rrca
     jr  nc,+_
     dec (ix+PPU_SUBCYCLE)
-_:  ;there... should be something else to do?
-    push iy
+_:  push iy
+        ;
+        ; You'll want to process the event stack here. Predicting and modifying
+        ; things that happens midframe is our task now.
+        ; Though if we choose not to do that, the event stack is still reset.
+        ;
         call ppu_drawFrameSuper
         ;call ppu_drawBGSprites
         call ppu_drawFGSprites
         call ppuBufSwap
     pop iy
 ppu_isr_nodraw:
+    ;Set CPU timing
     inc (ix+PPU_FRAMECOUNT)
     ld  bc,27939
     ld  a,(ix+PPU_SUBCYCLE)
@@ -2266,23 +2275,48 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     sbc hl,bc
     push hl
     pop iy
+    ; Push ISR handlers to interrupt stack
     ld  de,ppu_isr
     call int6502_adjustTimings
     call int6502_pushISRAfterPop
+    ld  bc,2273     ;distance from NMI to start of next frame render
+    ld  de,ppu_end_vsync
+    call int6502_insertISA
     set 7,(ix+PPU_STATUS)
+    ; Reinit variables
     ld  hl,(ppu_smc_gate)
-    ld  (hl),$00        ;nop out ret so writes no longer ignored.
-    ;
-    ; TODO: Figure this one out:
-    ; Do we need something to unset VBlank active flag at the end of
-    ; VBlank if left unread?
-    ;
-    bit 7,(ix+PPU_CTRL)     ;VBlank NMI enable flag
+    ld  a,(ppu_smc_gate_ports)
+    ld  (hl),a
+    ; Return to system
+    bit PPU_CTRL_VBLANK_NMI_ENABLE,(ix+PPU_CTRL)
     jp  z,i6502RetryFirstLoad
     ld  a,$FF
     ld  (ix+NMI_TRIGGERED),a
     jp  inst6502_brk_from_handler
 
+ppu_end_vsync:
+    ;TODO: Predict sprite 0 hit at this stage. If sprite 0 is predicted to
+    ;be hit, call int6502_pushISRAfterPop instead of int6502_removeTop with
+    ;DE set to ppu_sprite0_hit and BC set to which clock cycle to trigger on.
+    ;The math is as follows:
+    ;
+    ;
+    ;
+    ;
+    ;
+    call int6502_removeTop
+    xor a,a
+    ld  (ix+PPU_STATUS),a   ;all status flags reset at start of frame
+    ld  hl,(ppu_smc_gate)
+    ld  a,(ppu_smc_gate_stack)
+    ld  (hl),a
+    ld.s sp,EVENT_STACK_S
+    jp  i6502RetryFirstLoad
+
+ppu_sprite0_hit:
+    call int6502_removeTop
+    set PPU_STATUS_SPRITE_0_HIT,(ix+PPU_STATUS)
+    jp  i6502RetryFirstLoad
 
 ;==============================================================================
 ;

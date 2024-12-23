@@ -42,6 +42,8 @@ NAMETABLE3          .equ $D04800    ;These two don't exist on the NES but
 NAMETABLE4          .equ $D04C00    ;are present here in case mappers.
 OBJECT_ATTRIB_MEM   .equ $D05000    ;256 BYTES
 
+EVENT_STACK_L       .equ $D0FFFF
+EVENT_STACK_S       .equ EVENT_STACK_L & $00FFFF
 
 BASETABLE           .equ $D08000        ;variable size. 256*BASETABLE_STRIDE
 BASETABLE_STRIDE    .equ 12
@@ -49,8 +51,8 @@ PAGETABLE_OFFSET    .equ 0
 PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
 JUMPTABLE_OFFSET    .equ 4
 JUMPTABLE           .equ BASETABLE+JUMPTABLE_OFFSET
-USETABLE_OFFSET     .equ 8
-USETABLE            .equ BASETABLE+USETABLE_OFFSET
+;USETABLE_OFFSET     .equ 8
+;USETABLE            .equ BASETABLE+USETABLE_OFFSET
 
 
 ;
@@ -84,7 +86,9 @@ prg_rom_base        .equ mapper_adr_base+3  ;3b. Adjusted in case of trainer.
 chr_rom_base        .equ prg_rom_base+3     ;3b. Located somewhere.
 chr_rom_base_file   .equ chr_rom_base+3     ;1b. Nonzero if not in first file.
 ppu_smc_gate        .equ chr_rom_base_file+1    ;3b write address to ungate PPU
-chr_rom_cachefrom_A .equ ppu_smc_gate+3         ;3b. source of cache in bank 1
+ppu_smc_gate_ports  .equ ppu_smc_gate+3         ;1b smc target to direct register write
+ppu_smc_gate_stack  .equ ppu_smc_gate_ports+1   ;1b smc target to event stack write
+chr_rom_cachefrom_A .equ ppu_smc_gate_stack+1   ;3b. source of cache in bank 1
 chr_rom_cachefrom_B .equ chr_rom_cachefrom_A+3  ;3b. source of cache in bank 2
 timings_base        .equ chr_rom_cachefrom_B+3  ;3b. Current pointer to timings
 
@@ -124,6 +128,9 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
 ;
 ;
 #define WREG_CONST %01010101
+#if WREG_CONST != %01010101
+    .error "WREG_CONST must equal %01010101" 
+#endif
 
 ;PPU default locations. Some are not used
 #define DEBUGCONTROL ($40-$80)
@@ -136,6 +143,7 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
 #define PPU_ADDR -26
 #define PPU_DATA -25
 ;PPU internal stuff
+#define PPU_W_RESET -20     ;Write WREG_CONST on status read, for event stack.
 #define PPU_ATTRIBUTE_CACHE -19
 #define PPU_XSCROLL_FINE -18
 #define PPU_YSCROLL_FINE -17
@@ -180,6 +188,43 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
 #define SF_CARRY 0
 ;
 ;
+;Named PPU registers
+PPU_CTRL_ADR                .equ 0
+PPU_MASK_ADR                .equ 1
+PPU_STATUS_ADR              .equ 2
+PPU_OAMADDR_ADR             .equ 3
+PPU_OAMDATA_ADR             .equ 4
+PPU_SCROLL_ADR              .equ 5
+PPU_ADDR_ADR                .equ 6
+PPU_DATA_ADR                .equ 7
+;Named APU registers
+APU_PULSE1_TIMER_ADR        .equ $00
+APU_PULSE1_LENCOUNT_ADR     .equ $01
+APU_PULSE1_ENVELOPE_ADR     .equ $02
+APU_PULSE1_SWEEP_ADR        .equ $03
+APU_PULSE2_TIMER_ADR        .equ $04
+APU_PULSE2_LENCOUNT_ADR     .equ $05
+APU_PULSE2_ENVELOPE_ADR     .equ $06
+APU_PULSE2_SWEEP_ADR        .equ $07
+APU_TRIANGLE_TIMER_ADR      .equ $08
+APU_TRIANGLE_UNUSED         .equ $09
+APU_TRIANGLE_LENCOUNT_ADR   .equ $0A
+APU_TRIANGLE_LINCOUNT_ADR   .equ $0B
+APU_NOISE_TIMER_ADR         .equ $0C
+APU_NOISE_LENCOUNT_ADR      .equ $0D
+APU_NOISE_ENVELOPE_ADR      .equ $0E
+APU_NOISE_LFSR_ADR          .equ $0F
+APU_DMC_TIMER_ADR           .equ $10
+APU_DMC_MEMORYREADER_ADR    .equ $11
+APU_DMC_SAMPLEBUFFER_ADR    .equ $12
+APU_DMC_OUTPUTUNIT_ADR      .equ $13
+APU_OAMDMA_ADR              .equ $14    ;Should be listed with PPU registers.
+APU_STATUS_ADR              .equ $15
+APU_UNKNOWN2_ADR            .equ $16
+APU_FRAMECOUNTER_ADR        .equ $17
+;Named I/O devices. Shares memory space with APU and even overlaps one port.
+IO_CONTROLLER1_ADR          .equ $16    ;read-and-write.
+IO_CONTROLLER2_ADR          .equ $17    ;read-only. Writes are for framecounter
 ;PPU_CTRL flag bits
 PPU_CTRL_BASE_NAMETABLE     .equ 0
 PPU_CTRL_VRAM_INCREMENT     .equ 2
@@ -197,6 +242,13 @@ PPU_MASK_RENDER_SPRITES     .equ 4
 PPU_MASK_EMPHASIS_RED       .equ 5
 PPU_MASK_EMPHASIS_GREEN     .equ 6
 PPU_MASK_EMPHASIS_BLUE      .equ 7
+;PPU_STATUS flag bigs
+PPU_STATUS_VBLANK_TRIGGERED .equ 7
+PPU_STATUS_SPRITE_0_HIT     .equ 6
+PPU_STATUS_SPRITE_OVERFLOW  .equ 5  ;not implemented. Too bugged.
+
+
+
 ;OBJECT ATTRIBUTE TABLE OFFSET BYTES AND BITS
 OAM_YPOS        .equ 0
 OAM_INDEX       .equ 1
@@ -218,8 +270,12 @@ OAM_VFLIP       .equ 7
     #endif
 #endmacro
 
-;
-;
-;
+;`start` is the address right before the JR instruction, as you would label it.
+;`target` is the address where the JR instruction needs to jump to.
+#define JR_OPERAND(start, target) ((target-start)-2)+0
+
+
+
+
 #endif
 .list
