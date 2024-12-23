@@ -16,8 +16,8 @@ Progress
   thing you're seeing at the moment~~
 * ROM files up to 48KB can now be converted via .IPYNB test script.
 * Converted ROM files loads using generic machinery. ~~Pls don't put any ROM other
-  than nestest on the calc. It can't tell the difference; it'll just load the
-  first thing that looks like a ROM file. Everything else has been rigged to
+  than nestest on the calc. It can't tell the difference;~~ it'll just load the
+  first thing that looks like a ROM file. ~~Everything else has been rigged to
   debug specifically for nestest and they'll get super confused~~.
 * Partially implemented Mapper 0. ~~I still haven't implemented a PPU, so... yeah.~~
 * Simple PPU implemented. Is now capable of no-shenanigans BG and 
