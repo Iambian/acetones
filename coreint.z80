@@ -80,6 +80,7 @@ _:  ld  hl,(ix+0)
 int6502_consume:
     ld  ix,INT_TABLE
     ld  c,(ix-1)
+    dec (ix-1)
     ld  b,6
     mlt bc
     lea de,ix+0
