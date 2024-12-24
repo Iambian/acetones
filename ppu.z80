@@ -55,7 +55,7 @@ ppu_drawFrameSuper:
     ;===================================================================
     ;THIS WHOLE CACHEING THING NEEDS TO BE DOINE IN THE MAPPER INSTEAD 
     ;OF HERE. THE MAPPER IS WHAT CONTROLS WHAT CHR_ROM GETS BANKED WHERE
-    ;jr $
+    
     ld  de,(chr_rom_base)
     ld  hl,(chr_rom_cachefrom_A)
     or  a,a
@@ -242,7 +242,7 @@ _:  and a,%00001100
     ld  a,(de)
     ld  (ppu_debug_first_byte_in_nametable+1),a
 
-    ;jr $
+    
 
 
 ppu_midVertLoop:
@@ -566,7 +566,7 @@ ppu_drawFrameSuper_fineYScrolling:
     ;ld  a,(ix+PPU_YSCROLL_FINE)
     ;cp  a,7
     ;jr  z,$
-    ;jr $
+    
     ld  hl,(ix+PPU_NAMETABLE_PTR)
 ppu_fineYVertLoop:
     ld  (ix+PPU_HCOUNT),32
@@ -1086,7 +1086,7 @@ ppu_fineXHorizLoop_bufskipright .equ $+1
     exx     ;TO: Normal
     djnz -_
     exx     ;TO: Loop
-    ;jr $
+    
 ppu_fineXHorizLoop_resetbufright .equ $+1
     ld  de,-1    ; = X. We are already at the correct height.
     ;ABOVE COMMENT IS A LIAR. IT'S ACTUALLY... I... DON'T KNOW.
@@ -1593,7 +1593,7 @@ ppu_fineAllHorizLoop_bufskipright .equ $+1
     exx     ;TO: Normal
     djnz -_
     exx     ;TO: Loop
-    ;jr $
+    
 ppu_fineAllHorizLoop_resetbufright .equ $+1
     ld  de,-1    ; = X. We are already at the correct height.
     ;ABOVE COMMENT IS A LIAR. IT'S ACTUALLY... I... DON'T KNOW.
@@ -2219,13 +2219,10 @@ ppu_init:
     ld  bc,64*2
     ldir
     ; Sets up the core's interrupt subsystem
-    xor a,a
-    ld  (int_table_len),a
     ld  de,ppu_isr
     ld  bc,27939
-    call int6502_insertISA  ;sets ix. ix before this unknown.
     ld  (ix+PPU_SUBCYCLE),2
-    ret
+    jp  int6502_init
 
 
 
@@ -2277,11 +2274,10 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     pop iy
     ; Push ISR handlers to interrupt stack
     ld  de,ppu_isr
-    call int6502_adjustTimings
-    call int6502_pushISRAfterPop
+    call int6502_nmiAdjust
     ld  bc,2273     ;distance from NMI to start of next frame render
     ld  de,ppu_end_vsync
-    call int6502_insertISA
+    call int6502_insert
     set 7,(ix+PPU_STATUS)
     ; Reinit variables
     ld  hl,(ppu_smc_gate)
@@ -2304,7 +2300,7 @@ ppu_end_vsync:
     ;
     ;
     ;
-    call int6502_removeTop
+    call int6502_consume
     xor a,a
     ld  (ix+PPU_STATUS),a   ;all status flags reset at start of frame
     ld  hl,(ppu_smc_gate)
@@ -2314,7 +2310,7 @@ ppu_end_vsync:
     jp  i6502RetryFirstLoad
 
 ppu_sprite0_hit:
-    call int6502_removeTop
+    call int6502_consume
     set PPU_STATUS_SPRITE_0_HIT,(ix+PPU_STATUS)
     jp  i6502RetryFirstLoad
 

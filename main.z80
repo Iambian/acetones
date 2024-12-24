@@ -136,10 +136,9 @@ _:      ld  a,(hl)
     call waituntilkeyrelease
     call ppuBufSwap
 
-    call int6502_init
     call ppu_init
     call i6502Init
-    ;jr $
+    
 
     ;===========================================================================
     ;===========================================================================
@@ -279,7 +278,7 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
     ld  (hl),%00000011  \ inc hl    ;attribs
     ld  (hl),$10                ;xpos
 
-    ;jr $
+    
 ;kbitDown	equ 00h
 ;kbitLeft	equ 01h
 ;kbitRight	equ 02h
@@ -294,7 +293,7 @@ drawFrameLoop:
     ;Note: Not changing base this time around. For next time
     ld  ix,$D03280
     call ppu_drawFrameSuper
-    ;jr $
+    
     call ppu_drawFGSprites
     call ppuBufSwap
     ;

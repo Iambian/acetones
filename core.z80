@@ -157,7 +157,7 @@ _:                  ld  a,(hl)
                     or  a,a
                     sbc hl,de
                     jr  nz,$    ;halt program if IX is not core_memory_ix
-                    ;jr $
+                    
                     push iy
                         call dbg_printLine
                     pop iy
