@@ -2247,14 +2247,38 @@ ppu_isr:
     rrca
     jr  nc,+_
     dec (ix+PPU_SUBCYCLE)
-_:  ;
+_:  ;Begin processing event stack
     ;
-    ; You should probably process the event stack here.
-    ;   TODO: AT LEAST A STOPGAP SO THE SCREEN WILL EVENTUALLY TURN ON/OFF IF
-    ;           SOMEONE ATTEMPTS THOSE SHENANIGANS MIDFRAME AS OPPOSE TO FREEZE.
-    ;
+    ;NOTE: WHAT WE HAVE HERE IS A STOPGAP MEASURE INTENDED TO TURN THE RENDERER
+    ;       ON OR OFF TO PREVENT LOCKUPS.
     ;
     push iy
+        or  a,a
+        sbc hl,hl
+        add.s hl,sp
+        ex  de,hl
+        ld  hl,$010000
+        or  a,a
+        sbc hl,de
+        srl h \ rr l
+        srl h \ rr l    ;div by 4. HL is now number of entries the stack pushed.
+        push hl
+        pop bc
+        inc.s bc    ;checking if there were any entries. Didn't want to do it
+        cpi         ;this way, but that darned HLU/BCU byte made it hard.
+        jp  po,ppu_isr_stackEmpty
+        ld  iy,$010000-4    ;+0=[MSB=data,LSB=port], +2=time
+ppu_isr_stackLoop:
+        ld.s bc,(iy+0)
+        ld  a,c
+        cp  a,PPU_MASK_ADR
+        jr  nz,+_
+        ld  (ix+PPU_MASK),b
+_:      lea iy,iy-4
+        cpi     ;using this solely for loop checking using BC
+        jp  pe,ppu_isr_stackLoop
+ppu_isr_stackEmpty:
+        ;
         call ppu_configureCaches
         bit PPU_MASK_RENDER_BG,(ix+PPU_MASK)
         jr  nz,+_

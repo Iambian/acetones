@@ -42,7 +42,7 @@ NAMETABLE3          .equ $D04800    ;These two don't exist on the NES but
 NAMETABLE4          .equ $D04C00    ;are present here in case mappers.
 OBJECT_ATTRIB_MEM   .equ $D05000    ;256 BYTES
 
-EVENT_STACK_L       .equ $D0FFFF
+EVENT_STACK_L       .equ $D10000
 EVENT_STACK_S       .equ EVENT_STACK_L & $00FFFF
 
 BASETABLE           .equ $D08000        ;variable size. 256*BASETABLE_STRIDE
