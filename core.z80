@@ -225,7 +225,7 @@ i6502_take_interrupt:
     xor a,a
     ld  (ix+REGPC+0),e
     ld  hl,(INT_TABLE)  ;Find the routines in "coreint.z80" that handles
-    jr $    ;###################################################################
+    ;jr $    ;###################################################################
     jp  (hl)            ;and maintains the interrupt table being used here.
 
 

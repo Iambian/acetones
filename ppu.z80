@@ -50,8 +50,7 @@ _:  ld  e,(iy+0)
     jr  nz,--_
     ret
 
-;4288
-ppu_drawFrameSuper:
+ppu_configureCaches:
     ;===================================================================
     ;THIS WHOLE CACHEING THING NEEDS TO BE DOINE IN THE MAPPER INSTEAD 
     ;OF HERE. THE MAPPER IS WHAT CONTROLS WHAT CHR_ROM GETS BANKED WHERE
@@ -125,6 +124,14 @@ ppu_drawFrameSuper_skipPaletteReload:
     jr  z,$+3
     ex de,hl
     ld  (chr_rom_sprites),hl
+    ret
+
+
+
+
+
+;4288
+ppu_drawFrameSuper:
     ;set base nametable addresses
     ld  hl,nametable00
     ld  a,(ix+PPU_CTRL)
@@ -2225,38 +2232,41 @@ ppu_init:
     jp  int6502_init
 
 
-
+;
 ;Some bits of this is in "coreint.z80"
+;
 ppu_isr:
-    ;TODO: Copy PPU register memory to IX space, modify ppu_mapper to write
-    ;to that memory where possible; elsewhere where not.
-    ;OR. WHY NOT JUST SET THE COMMON MEMORY MAPPER PPU AREA TO MAP DIRECTLY
-    ;TO THE MEMORY THAT IX POINTS TO? WE DO BOUNDS CHECKING ANYHOW...
-    ;AS A SIDE-EFFECT, THIS WILL SHORTEN THE PPU_MAPPER ROUTINE. AND MAYBE
-    ;MAKE IT RUN FASTER.
     ld  a,($F00020)
     and a,%0000001
     jp  nz,endCurrentRun    ;stop execution when ON key is pressed
 
     ld  a,(ix+PPU_MASK)
     and a,(1<<PPU_MASK_RENDER_BG)|(1<<PPU_MASK_RENDER_SPRITES)
-    jr  z,ppu_isr_nodraw
+    jr  z,+_
     ld  a,(ix+PPU_FRAMECOUNT)
     rrca
     jr  nc,+_
     dec (ix+PPU_SUBCYCLE)
-_:  push iy
-        ;
-        ; You'll want to process the event stack here. Predicting and modifying
-        ; things that happens midframe is our task now.
-        ; Though if we choose not to do that, the event stack is still reset.
-        ;
-        call ppu_drawFrameSuper
+_:  ;
+    ;
+    ; You should probably process the event stack here.
+    ;   TODO: AT LEAST A STOPGAP SO THE SCREEN WILL EVENTUALLY TURN ON/OFF IF
+    ;           SOMEONE ATTEMPTS THOSE SHENANIGANS MIDFRAME AS OPPOSE TO FREEZE.
+    ;
+    ;
+    push iy
+        call ppu_configureCaches
+        bit PPU_MASK_RENDER_BG,(ix+PPU_MASK)
+        jr  nz,+_
+        call ppu_drawSolidBackdrop
+        jr  ++_
+_:      call ppu_drawFrameSuper
+_:      bit PPU_MASK_RENDER_SPRITES,(ix+PPU_MASK)
+        jr z,+_
         ;call ppu_drawBGSprites
         call ppu_drawFGSprites
-        call ppuBufSwap
+_:      call ppuBufSwap
     pop iy
-ppu_isr_nodraw:
     ;Set CPU timing
     inc (ix+PPU_FRAMECOUNT)
     ld  bc,27939
@@ -2267,13 +2277,12 @@ ppu_isr_nodraw:
     sub a,3
     inc bc
 _:  ld  (ix+PPU_SUBCYCLE),a
-    lea hl,iy+0
     or  a,a
+    sbc hl,hl
     sbc hl,bc
-    push hl
-    pop iy
+    ex  de,hl
+    add iy,de   ;Adjust CPU cycle counter
     ; Push ISR handlers to interrupt stack
-    ld  de,ppu_isr
     call int6502_nmiAdjust
     ld  bc,2273     ;distance from NMI to start of next frame render
     ld  de,ppu_end_vsync
@@ -2296,18 +2305,24 @@ ppu_end_vsync:
     ;DE set to ppu_sprite0_hit and BC set to which clock cycle to trigger on.
     ;The math is as follows:
     ;
-    ;
-    ;
-    ;
+    ;   OOPS I HAVEN'T THOUGHT OF IT. SOZ.
     ;
     call int6502_consume
     xor a,a
     ld  (ix+PPU_STATUS),a   ;all status flags reset at start of frame
+    ld  a,(ix+PPU_MASK)
+    and a,(1<<PPU_MASK_RENDER_BG)|(1<<PPU_MASK_RENDER_SPRITES)
+    call nz,ppu_gate_out_ppu    ;if rendering, push render calls to event stack
+    jp  i6502RetryFirstLoad
+
+ppu_gate_out_ppu:
+    
     ld  hl,(ppu_smc_gate)
     ld  a,(ppu_smc_gate_stack)
     ld  (hl),a
     ld.s sp,EVENT_STACK_S
-    jp  i6502RetryFirstLoad
+    ret
+
 
 ppu_sprite0_hit:
     call int6502_consume
@@ -2323,28 +2338,17 @@ ppu_sprite0_hit:
 ;==============================================================================
 
 
-
-;TODO: Test changes to the PPU and link together something in the mapper
-;to perform controls. Also. Those freakin' interrupts. DO THEM.
-;Might also want to implement a drawlist of sorts since writes to the ports
-;ought to be timestamped. That way, we'll be able to tell what the hell is
-;being done mid-frame and then make adjustments to such things as
-;BG rendering mid-draw, if necessary. Or be able to detect such attempts as
-;I don't think I want to deal with that. Only deal with stuff that should
-;be occurring within the VBlank period.
-
-
-
-
 ;backdrop color. Do not render the following if there are no
 ;sprites to hide in the background.
-    ld  hl,(curScreenBuf)
-    ld  bc,256*224+1    ;because push.
-    add hl,bc
+ppu_drawSolidBackdrop:
     ld  (++_+1),sp
+    ld  hl,(curScreenBuf)
+    ld  sp,256*224
+    add hl,sp
     ld  sp,hl
     ld  b,191
     ld  de,0
+    ;    1         2         3         4         5         6         7         8         9         10 
 _:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
@@ -2355,11 +2359,16 @@ _:  push de \ push de \ push de \ push de \ push de \ push de \ push de \ push d
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    djnz -_
+    djnz -_     ;100 pushes. 3 bytes. 300 bytes per iter. B=191.
+    ;Remaining bytes to write: 44
     push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de \ push de
-    push de \ push de \ push de \ push de \ push de 
+    ;Remaining bytes to write: 14.
+    push de \ push de \ push de \ push de 
+    ;Remaining bytes to write: 2
+    inc sp
+    push de 
 _:  ld  sp,0
-
+    ret
 
 
 

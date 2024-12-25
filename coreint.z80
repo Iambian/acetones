@@ -25,6 +25,7 @@ int6502_setInt:
 ;This will readjust existing timers that have a longer time than the NMI.
 ;This will not adjust i6502_interrupt_timer. If you don't push entries to the
 ;table after calling this, you must call int6502_setInt manually.
+;Inputs: None. Table itself is adjusted.
 int6502_nmiAdjust:
     ld  hl,INT_TABLE-1
     ld  a,(hl)
@@ -34,8 +35,8 @@ int6502_nmiAdjust:
     inc hl
     inc hl
     inc hl
-_:  ld  bc,(hl)
-    inc hl
+    ld  bc,(hl)
+_:  inc hl
     inc hl
     inc hl
     inc hl
