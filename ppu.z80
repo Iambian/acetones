@@ -2301,6 +2301,7 @@ _:      call ppuBufSwap
     sub a,3
     inc bc
 _:  ld  (ix+PPU_SUBCYCLE),a
+    
     or  a,a
     sbc hl,hl
     sbc hl,bc

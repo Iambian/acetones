@@ -790,8 +790,8 @@ mapper0_read:
     jr  nc,+_
     ld  a,(hl)  ;is $8000 or above
     ret
-    cp  a,$20*2
-    jr  c,+_
+_:  cp  a,$20*2
+    jr  nc,+_
     ld  a,(hl)  ;is below $2000
     ret
 _:  add a,a
@@ -803,6 +803,7 @@ mapper0_apu_read:
     ld  a,c
     cp  a,$16
     jr  nz,+_
+    xor a,a
     scf
     rr  (ix+APU_KEYPAD)     ;after bits are exhausted, should read '1'
     adc a,$40               ;Simulate open bus behavior
@@ -921,7 +922,7 @@ mapper0_apu_write:
     ld  a,(hl)
     cp  a,3
     ret z       ;don't do anything to the keyboard if running continuous.
-    ld  (hl),a  ;else set to continuous and keep going.
+    ld  (hl),3  ;else set to continuous and keep going.
     ret
 mapper0_apu_stop_keyboard:
     ld  L,$12   ;76543210 : del mode 2nd y= wind zoom trace graph

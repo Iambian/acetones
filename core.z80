@@ -1176,6 +1176,7 @@ inst6502_dec_zpx:
 
 ;    absolute	DEC oper	CE	3	6  
 inst6502_dec_abs:
+    ;jr $
     call subroutine6502_abs_split_start
     push hl
         ld  d,b
