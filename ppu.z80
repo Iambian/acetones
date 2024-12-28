@@ -469,7 +469,7 @@ ppu_midRestoreSP .equ $+1
 ppu_debug_first_byte_in_nametable:
     ld a,0
 
-    call printFrameCounterPair
+    ;call printFrameCounterPair
     ;call skipSpace
     xor a,a
     sbc hl,hl
@@ -488,23 +488,23 @@ _:  inc a
     daa
     push de
         ;ld  a,(ix+PPU_XSCROLL)
-        ld a,(OBJECT_ATTRIB_MEM+OAM_XPOS)
+        ;ld a,(OBJECT_ATTRIB_MEM+OAM_XPOS)
         call printFrameCounterPair
         ;call skipSpace
     pop de
-    xor a,a
-    ld  e,d
-    ld  d,a
-    ld  hl,32768/256*100
-_:  inc a
-    sbc hl,de
-    jr  nc,-_
-    dec a
-    or  a,a ;clears necessary flags
-    daa
+    ;xor a,a
+    ;ld  e,d
+    ;ld  d,a
+    ;ld  hl,32768/256*100
+_:  ;inc a
+    ;sbc hl,de
+    ;jr  nc,-_
+    ;dec a
+    ;or  a,a ;clears necessary flags
+    ;daa
     ;ld  a,(ix+PPU_YSCROLL)
-    ld a,(OBJECT_ATTRIB_MEM+OAM_YPOS)
-    call printFrameCounterPair
+    ;ld a,(OBJECT_ATTRIB_MEM+OAM_YPOS)
+    ;call printFrameCounterPair
 ppu_noframerateSuper:
     ret
 
@@ -2269,12 +2269,26 @@ _:  ;Begin processing event stack
         jp  po,ppu_isr_stackEmpty
         ld  iy,$010000-4    ;+0=[MSB=data,LSB=port], +2=time
 ppu_isr_stackLoop:
-        ld.s bc,(iy+0)
-        ld  a,c
+        ld.s de,(iy+0)
+        ld  a,e
         cp  a,PPU_MASK_ADR
         jr  nz,+_
-        ld  (ix+PPU_MASK),b
-_:      lea iy,iy-4
+        ld  (ix+PPU_MASK),d
+_:      cp  a,PPU_CTRL_ADR
+        jr  nz,+_
+        ld  (ix+PPU_CTRL),d
+_:      cp  a,PPU_SCROLL_ADR
+        jr  nz,++_
+        rrc (IX+PPU_W)
+        jr  c,+_
+        ld  (ix+PPU_YSCROLL),d
+        jr  ++_
+_:      ld  (ix+PPU_XSCROLL),d
+_:      add a,a
+        jr  nc,+_
+        ld  (ix+PPU_W),WREG_CONST
+_:
+        lea iy,iy-4
         cpi     ;using this solely for loop checking using BC
         jp  pe,ppu_isr_stackLoop
 ppu_isr_stackEmpty:
@@ -2325,15 +2339,28 @@ _:  ld  (ix+PPU_SUBCYCLE),a
     jp  inst6502_brk_from_handler
 
 ppu_end_vsync:
-    ;TODO: Predict sprite 0 hit at this stage. If sprite 0 is predicted to
-    ;be hit, call int6502_pushISRAfterPop instead of int6502_removeTop with
-    ;DE set to ppu_sprite0_hit and BC set to which clock cycle to trigger on.
-    ;The math is as follows:
-    ;
-    ;   OOPS I HAVEN'T THOUGHT OF IT. SOZ.
-    ;
     call int6502_consume
-    xor a,a
+    ;Predict Sprite 0 hit
+    ld  a,(OBJECT_ATTRIB_MEM+OAM_YPOS)
+    cp  a,240
+    jr  nc,+_
+    ld  L,a
+    ld  h,340/3
+    mlt hl
+    ld  a,(OBJECT_ATTRIB_MEM+OAM_xPOS)
+    ld  e,a
+    ld  d,85
+    mlt de  ;cheap div 3 oper
+    ld  e,d
+    ld  d,0
+    add hl,de
+    ld  de,2273
+    add hl,de
+    push hl
+    pop bc
+    ld  de,ppu_sprite0_hit
+    call int6502_insert
+_:  xor a,a
     ld  (ix+PPU_STATUS),a   ;all status flags reset at start of frame
     ld  a,(ix+PPU_MASK)
     and a,(1<<PPU_MASK_RENDER_BG)|(1<<PPU_MASK_RENDER_SPRITES)
@@ -2341,7 +2368,6 @@ ppu_end_vsync:
     jp  i6502RetryFirstLoad
 
 ppu_gate_out_ppu:
-    
     ld  hl,(ppu_smc_gate)
     ld  a,(ppu_smc_gate_stack)
     ld  (hl),a

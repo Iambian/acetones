@@ -831,6 +831,15 @@ _:  lea hl,ix+PPU_CTRL
     ld  l,a
     ld  a,(hl)  
     ret
+
+mapper0_ppu_read_oamdata:
+    ;this needs to be more complex than this. But I'm not. I won't.
+    ;Not now. Not going to play Micro Machines. I don't wanna.
+    ld  hl,OBJECT_ATTRIB_MEM
+    ld  L,(ix+PPU_OAMADDR)
+    ld  a,(hl)
+    ret
+
 mapper0_ppu_read_ppustatus:
     ;reading ppustatus does additional things.
     ld  a,WREG_CONST
@@ -853,12 +862,17 @@ mapper0_ppu_read_ppudata:
         ld  e,(ix+PPU_V+0)
         add hl,de
     pop de
-    ld  a,(hl)
+    ld  a,(ix+PPU_DATA) ;following dance simulates delayed buffer read
+    ld  b,(hl)
+    ld  (ix+PPU_DATA),b
     ret
 _:  cp  a,$3F
     jr  nz,+_
     ld  a,(ix+PPU_V+0)
-    and a,%00111111
+    tst a,%00001111
+    jr  nz,+_
+    xor a,a
+_:  and a,%00011111
     ld  hl,vram_palette
     ld  L,a
     ld  a,(hl)
@@ -885,13 +899,7 @@ _:  ld  a,(ix+PPU_DATA) ;following dance simulates delayed buffer read
     ld  b,(hl)
     ld  (ix+PPU_DATA),b
     ret
-mapper0_ppu_read_oamdata:
-    ;this needs to be more complex than this. But I'm not. I won't.
-    ;Not now. Not going to play Micro Machines. I don't wanna.
-    ld  hl,OBJECT_ATTRIB_MEM
-    ld  L,(ix+PPU_OAMADDR)
-    ld  a,(hl)
-    ret
+
 
 
 mapper0_write:
@@ -1093,7 +1101,10 @@ _:  ret
 _:  ld  hl,vram_palette
     ld  a,(ix+PPU_V+0)
     inc (ix+PPU_V+0)    ;nobody would ever inc 32 on a palette write.
-    and a,%00011111
+    tst a,%00001111
+    jr  nz,+_
+    xor a,a
+_:  and a,%00011111
     ld  L,a
     ld  (hl),b
     ret
