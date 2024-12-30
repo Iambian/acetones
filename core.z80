@@ -42,6 +42,18 @@
 ;mappings are program-dependant. Only $0000-$3FFF will be mapped in here
 ;more or less because I don't expect anything else to map that.
 i6502Init:
+    ld  hl,main_ram
+    ld  de,main_ram+1
+    ld  bc,2047
+    ld  (hl),0
+    ldir        ;tryna debug a problem that happens after first run
+    ld  hl,scrap_mapping
+    ld  de,scrap_mapping+1
+    ld  bc,255
+    ld  (hl),0
+    ldir
+
+
     ;TODO: Randomize 2048 bytes at main_ram to simulate power-on state.
     ;NOTE: Some games rely on this for state of randomness (e.g. FF1)
     ;Mirror 32 pages of 8 page of main_ram starting at logical page $00
@@ -114,6 +126,15 @@ i6502NextLoad:
     ld  hl,(hl)     ;get address to current page's base
     ld  e,0         ;PCL known to be zero at this point.
 i6502FinishLoad:
+    ld  (ix+REGPC+0),e
+    ld.s  de,(ix+REGPC)
+    push hl
+        ld  hl,$8052
+        or a,a
+        sbc hl,de
+        ;jr z,$
+    pop hl
+
     ld  a,(hl)
 
 #ifdef COREDEBUG
@@ -179,7 +200,7 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
     pop af
 #endif
     push hl
-        push af
+        ;push af
             ;ld  a,(ix+PPU_FRAMECOUNT)
             ;or  a,a
             ;cp  a,$20
@@ -188,13 +209,14 @@ _:                  ld  iy,(ix+CYCLES_CURRENT)  ;remove when done with timings
             ;lea hl,iy
             ;add hl,bc
             ;jr  c,$
-_:      pop af
+_:      ;pop af
         lea hl,iy
 i6502_interrupt_timer   .equ $+1
         ld  bc,-27939
         add hl,bc
         jr  c,i6502_take_interrupt
 i6502_continue_instruction_fetch:
+        ld  d,(ix+REGPC+1)
         ld  h,a
         ld  l,BASETABLE_STRIDE
         mlt hl

@@ -21,6 +21,10 @@
 
 programStart:
     di
+    ;jr $
+
+    ld.s sp,0
+
     ;Initialize from start to safeRam to end of 16-bit block.
     ld  hl,$D031F6
     push hl \ pop de \ inc de
@@ -33,9 +37,11 @@ programStart:
     ld  (ix+$28),1      ;If latch was set, clear it.
     ;Continuous. Else it'd be possible for an NES ROM to tank the CPU
     ;performance by constantly polling the keyboard.
+
     ld  hl,mpKeyMode
     ld  (hl),3      
     ld  (save_spl),sp
+    ld  sp,main_ram     ;save values backwards into saferam1. barely using it.
     ld  a,MB
     ld  (save_mbase),a
     ld  a,$D0
@@ -292,6 +298,7 @@ _:  ld  hl,NAMETABLE1+((7*32)+8)
 drawFrameLoop:
     ;Note: Not changing base this time around. For next time
     ld  ix,$D03280
+    call ppu_configureCaches
     call ppu_drawFrameSuper
     
     call ppu_drawFGSprites
@@ -1002,7 +1009,10 @@ mapper0_ppu_write_stack:
     ld  a,c
     and a,%00000111
     ld  c,a
-    cp  a,PPU_ADDR_ADR
+    cp  a,PPU_CTRL_ADR
+    jr  nz,+_
+    ld  (core_memory_ix+PPU_CTRL),a     ;write AND cache writes to CTRL_ADR
+_:  cp  a,PPU_ADDR_ADR
     jr  z,+_
     cp  a,PPU_SCROLL_ADR
     jr  nz,++_
@@ -1236,5 +1246,7 @@ _:  call getkbd_adl
 #include "debug.z80"
 #include "ppu.z80"
 #include "palette.z80"
+
+programEnd:
 
 .echo "Main program size: ",$-programStart

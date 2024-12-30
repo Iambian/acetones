@@ -384,6 +384,9 @@ _:  ;
     ;Vertical movement handling
     ;
     ld  hl,(ix+PPU_NAMETABLE_PTR)
+    ld  a,L
+    xor a,%00000100
+    ld  L,a
     ld  a,e
     add a,32    ;increment Y
     ld  e,a
@@ -2211,9 +2214,15 @@ ppu_init:
     ld  ix,core_memory_ix
     lea hl,ix-128
     lea de,ix-127
-    ld  bc,126
+    ld  bc,127
     ld  (hl),$00
     ldir
+    ; Clear out specific variables that aren't initialized elsewhere. eg cache
+    or  a,a
+    sbc hl,hl
+    ld  (chr_rom_cachefrom_A),hl
+    ld  (chr_rom_cachefrom_B),hl
+    
     ; Bit pattern used in detecting even-odd frames
     ld  a,WREG_CONST
     ld  (ix+PPU_W),a

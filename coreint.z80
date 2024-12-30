@@ -1,26 +1,6 @@
 ; Code to handle interrup servicer. Note: This hinges on 
 ; PPU timing, so some of its initilization code will end up here too.
 
-;BC=timeToInterrupt, DE=address
-int6502_init:
-    ld  hl,INT_TABLE-1
-    ld  (hl),1
-    inc hl
-    ld  (hl),de
-    inc hl
-    inc hl
-    inc hl
-    ld  (hl),bc
-int6502_setInt:
-    ld  ix,core_memory_ix
-    ld  hl,INT_TABLE+3
-    ld  bc,(hl)
-    or  a,a
-    sbc hl,hl
-    sbc hl,bc
-    ld  (i6502_interrupt_timer),hl
-    ret
-
 ;Call this in your NMI **BEFORE** you modify the interrupt table in any way.
 ;This will readjust existing timers that have a longer time than the NMI.
 ;This will not adjust i6502_interrupt_timer. If you don't push entries to the
@@ -53,9 +33,31 @@ _:  inc hl
     ret
 
 ;BC=timeToInterrupt, DE=address
+int6502_init:
+    ld  hl,INT_TABLE-1
+    ld  (hl),1
+    inc hl
+    ld  (hl),de
+    inc hl
+    inc hl
+    inc hl
+    ld  (hl),bc
+int6502_setInt:
+    ld  ix,core_memory_ix
+    ld  hl,INT_TABLE+3
+    ld  bc,(hl)
+    or  a,a
+    sbc hl,hl
+    sbc hl,bc
+    ld  (i6502_interrupt_timer),hl
+    ret
+
+;BC=timeToInterrupt, DE=address
 int6502_insert:
     ld  ix,INT_TABLE
     ld  a,(ix-1)
+    cp  a,INT_TABLE_MAXLEN
+    jr  z,$     ;should never reach limit. lock program in case.
     inc (ix-1)
 _:  ld  hl,(ix+3)
     or  a,a
@@ -81,6 +83,9 @@ _:  ld  hl,(ix+0)
 int6502_consume:
     ld  ix,INT_TABLE
     ld  c,(ix-1)
+    inc c
+    dec c
+    jr  z,$     ;Never consume on an empty table. wtf. lock program if happens.
     dec (ix-1)
     ld  b,6
     mlt bc

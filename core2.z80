@@ -1,0 +1,117 @@
+
+
+#include "defs.inc"
+.org usermem-2
+.db $EF, $7B
+
+CALLTABLE_BASE = $D08000
+CALLTABLE_MAX_NUMCALLS_PER_CELL = 5
+CALLTABLE_STRIDE = 3*CALLTABLE_MAX_NUMCALLS_PER_CELL
+CALLTABLE_SIZE = 256*CALLTABLE_STRIDE
+
+
+
+
+
+
+
+a6502_init:
+    ;stuff
+    ;stuff
+    ;stuff
+
+    ;Setup normal registers
+    ld  iy,8
+    ;Setup shadow registers
+    exx
+    exx
+
+
+
+
+
+
+
+
+
+a6502_getInstruction:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  c,d
+    ld  b,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+_:  exx
+a6502_int_timer         .equ $+1
+    ld  bc,-27939
+    add hl,bc
+    jr  c,a6502_int_take
+a6502_int_cancel_take:
+    ld  L,a
+    ld  h,CALLTABLE_STRIDE
+    ld  sp,CALLTABLE_BASE
+    add hl,sp
+    ld  sp,hl
+    exx
+    ret
+
+;:You probably shouldn't.
+a6502_adrmode_read_imm:
+    ld  a,(hl)
+    ret
+
+;Maybe not standalone either.
+a6502_adrmode_read_abs:
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  a,c
+    inc d
+    ld  c,d
+    ld  b,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  c,a
+_:  ld  b,(hl)
+    ret
+
+;That ret is making it slow.
+a6502_adrmode_read_zp:
+    ld  bc,ZEROPAGE
+    ld  c,(hl)
+    ld  a,(bc)
+    ret
+
+a6502_adrmode_read_zpx:
+    ld  bc,ZEROPAGE
+    ld  a,(ix+REGX)
+    add a,(hl)
+    ld  c,a
+    ld  a,(bc)
+    ret
+
+a6502_adrmode_read_zpy:
+    ld  bc,ZEROPAGE
+    ld  a,(ix+REGY)
+    add a,(hl)
+    ld  c,a
+    ld  a,(bc)
+    ret
+
+a6502_adrmode_read_absx:
+
+
+
+
+
+

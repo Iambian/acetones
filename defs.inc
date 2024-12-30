@@ -105,12 +105,14 @@ FILE_SIZE_OFFSET    .equ 0
 FILE_ADR_OFFSET     .equ 2
 FILE_SIG_ADR_OFFSET .equ 5
 
-int_table_len       .equ FILETABLE+((MAXNUMFILES+1)*FILETABLE_STRIDE)
-INT_TABLE           .equ int_table_len+1
+INT_TABLE           .equ FILETABLE+((MAXNUMFILES+1)*FILETABLE_STRIDE)+1
+int_table_len       .equ INT_TABLE-1
 INT_TABLE_MAXLEN    .equ 8
 INT_TABLE_STRIDE    .equ 6
 INT_ADDR_OFFSET     .equ 0
 INT_CYCLE_OFFSET    .equ 3
+
+TABLESEND           .equ INT_TABLE+(INT_TABLE_MAXLEN*INT_TABLE_STRIDE)
 
 ;
 ;
