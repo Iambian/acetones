@@ -714,6 +714,9 @@ _:  ;fine adjust: Move byte, then load to SMC
 _:  ;
     ;Vertical movement handling
     ;
+    ld  a,L
+    xor a,%00000100
+    ld  L,a
     ld  a,e
     add a,32    ;increment Y
     ld  e,a
@@ -1169,13 +1172,17 @@ _:  ;fine adjust: Move byte, then load to SMC
     rlca        
     and a,%00001100
     ld  (ppu_fineXHorizLoop_maskleft),a
-_:  ;NOTE: NOT ADJUSTED YET
+_:  
     ;Vertical movement handling
     ;
-;    ld  a,L
-;    xor a,%00000100 ;X is crossing backward. Reset this.
-;    ld  L,a
     ld  a,e
+    and a,%00011111
+    sub a,0     ;supposedly fixes boundary conditions?
+    jr  z,+_
+    ld  a,L
+    xor a,%00000100 ;X is crossing backward. Reset this.
+    ld  L,a
+_   ld  a,e
     add a,32    ;increment Y
     ld  e,a
     ld  a,d
@@ -1679,9 +1686,9 @@ _:  ;fine adjust: Move byte, then load to SMC
 _:  ;NOTE: NOT ADJUSTED YET
     ;Vertical movement handling
     ;
-;    ld  a,L
-;    xor a,%00000100 ;X is crossing backward. Reset this.
-;    ld  L,a
+    ld  a,L
+    xor a,%00000100 ;X is crossing backward. Reset this.
+    ld  L,a
     ld  a,e
     add a,32    ;increment Y
     ld  e,a

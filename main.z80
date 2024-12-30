@@ -309,30 +309,69 @@ drawFrameLoop:
         ;call waituntilkeyrelease
     pop af
     ld  iy,OBJECT_ATTRIB_MEM
+    ld  ix,$D03280
+    lea hl,ix+PPU_YSCROLL
+    lea bc,ix+PPU_XSCROLL
     ld  e,a
     bit kbitDown,e
     jr  z,+_
-    res OAM_VFLIP,(iy+OAM_ATTRIBUTES)
-    inc (iy+OAM_YPOS)
-;    inc (iy+OAM_YPOS)
+    ld  a,(bc)
+    and a,%00000111
+    ;jr  nz,+_
+    ld  a,(hl)
+    add a,1 ; add a,8
+    cp  a,$F0  ;bottom of screen
+    jr  c,+_-1
+    push af
+        ld  a,(ix+PPU_CTRL)
+        xor a,%00000010
+        ld  (ix+PPU_CTRL),a
+    pop af
+    add a,$10
+    ld  (hl),a
 _:  bit kbitUp,e
     jr  z,+_
-    set OAM_VFLIP,(iy+OAM_ATTRIBUTES)
-    dec (iy+OAM_YPOS)
-;    dec (iy+OAM_YPOS)
+    ld  a,(bc)
+    and a,%00000111
+    ;jr  nz,+_
+    ld  a,(hl)
+    sub a,1 ;sub a,8
+    jr  nc,+_-1
+    push af
+        ld  a,(ix+PPU_CTRL)
+        xor a,%00000010
+        ld  (ix+PPU_CTRL),a
+    pop af
+    sub a,$10
+    ld  (hl),a
 _:  bit kbitLeft,e
     jr  z,+_
-    set OAM_HFLIP,(iy+OAM_ATTRIBUTES)
-    dec (iy+OAM_XPOS)
-;    dec (iy+OAM_XPOS)
+    ld  a,(hl)
+    and a,%00000111
+    ;jr  nz,+_
+    ld  a,(bc)
+    sub a,1 ; 8
+    ld  (bc),a
+    jr  nc,+_
+    ld  a,(ix+PPU_CTRL)
+    xor a,%00000001
+    ld  (ix+PPU_CTRL),a
 _:  bit kbitRight,e
-    jr  z,+_
-    res OAM_HFLIP,(iy+OAM_ATTRIBUTES)
-    inc (iy+OAM_XPOS)
-;    inc (iy+OAM_XPOS)
+    jr  z,+_    
+    ld  a,(hl)
+    and a,%00000111
+    ;jr  nz,+_
+    ld  a,(bc)
+    add a,1 ;8
+    ld  (bc),a
+    jr  nc,+_
+    ld  a,(ix+PPU_CTRL)
+    xor a,%00000001
+    ld  (ix+PPU_CTRL),a
 _:  ld  a,e
     and a,(1<<kbitMode)+(1<<kbit2nd)+(1<<kbitDel)+(1<<kbitYequ)
     jp  z,drawFrameLoop
+
     ;call ppuBufSwap
 
     call setDefaultPalette
@@ -721,8 +760,8 @@ _:  ld  d,a
     ld  de,mapper_table
     add hl,de
     ld  (mapper_adr_base),hl
-    ld  hl,(hl)
-    jp  (hl)
+    ld  hl,(hl)     ;load mapper init location
+    jp  (hl)        ;Do the jump
 
 mapper_table:   ;entries 9 wide
 .dl mapper0_init
@@ -737,7 +776,9 @@ mapper0_init:
     ld  e,$70
     ld  c,2
     ld  b,c
-    call i6502_map_pages
+    push ix
+        call i6502_map_pages
+    pop ix
 _:  ld  hl,(prg_rom_size)
     ld  de,-(16384+1)
     add hl,de   ;carry if more than 1 16KB segment
@@ -748,7 +789,9 @@ _:  ld  hl,(prg_rom_size)
     ld  c,$40
     jr  nc,+_
     sla c
-_:  call i6502_map_pages
+_:  push ix
+        call i6502_map_pages
+    pop ix
     ;map in nametable mirroring
     ld  hl,NAMETABLE1
     ld  de,NAMETABLE2
