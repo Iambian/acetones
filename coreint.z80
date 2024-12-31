@@ -94,6 +94,20 @@ int6502_consume:
     ldir
     jr  int6502_setInt
     
+int6502_copymacro:
+    pop hl
+    ld  (+_++1),sp
+    ld  sp,hl
+    pop de
+    pop bc
+    pop hl
+    ldir
+    or  a,a
+    sbc hl,hl
+    add hl,sp
+_:  ld  sp,0
+    jp (hl)
+
 
 
 

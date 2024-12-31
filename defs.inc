@@ -277,6 +277,77 @@ OAM_VFLIP       .equ 7
 #define JR_OPERAND(start, target) ((target-start)-2)+0
 
 
+#macro set_autoreloc_target(target, sizelim)
+    #define g_reloc_target_origin eval(target)
+    #define g_reloc_target eval(target)
+    #define g_reloc_limit eval(target+sizelim)
+#endmacro
+
+#macro autoreloc()
+    #ifdef g_old_location
+        .error "You cannot nest relocate blocks!"
+    #else
+        #define g_old_location eval($)
+        #define g_new_location eval(g_reloc_target)
+        .org g_reloc_target
+    #endif
+#endmacro
+
+#macro endautoreloc()
+    #ifdef g_new_location
+        #define g_segment_size eval($-g_new_location)
+        #if ($ > g_reloc_limit)
+            .error "Ran out of room to relocate data to"
+        #endif
+        #define g_reloc_target eval($)
+
+        .org $ - g_new_location + g_old_location
+        .echo "Location space used: ",g_segment_size
+        #undefine g_new_location
+        #undefine g_old_location
+    #else
+        .error "No relocate statements corresponds to this endrelocate!"
+    #endif
+#endmacro
+
+#macro copy_autoalloc(oldtarget, newtarget, segmentsize)
+    call int6502_copymacro \ .dl newtarget, segmentsize, oldtarget
+#endmacro
+
+#macro reportautoreloc()
+    .echo "Autorelocator space remaining: ",g_reloc_limit-g_reloc_target
+#endmacro
+
+#macro relocate(location)
+    #ifdef g_old_location
+        .error "You cannot nest relocate blocks!"
+    #else
+        #define g_old_location eval($)
+        #define g_new_location eval(location)
+        .org location
+    #endif
+#endmacro
+
+#macro endrelocate()
+    #ifdef g_new_location
+        .org $ - g_new_location + g_old_location
+        #undefine g_new_location
+        #undefine g_old_location
+    #else
+        .error "No relocate statements corresponds to this endrelocate!"
+    #endif
+#endmacro
+
+
+
+
+
+
+
+
+
+
+
 
 
 #endif

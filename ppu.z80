@@ -2214,6 +2214,236 @@ ppu_drawFGSprites_saveSP .equ $+1
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
+ppu_fullTile_start:
+autoreloc()
+
+ppu_fullTile_entry:
+    ld  a,(de)
+    exx
+    ld  c,a
+    ld  b,64
+    mlt bc
+ppu_fullTile_spriteAdr .equ $+2
+    ld  iy,0
+    add iy,bc
+ppu_fullTile_attribMask .equ $+1
+    ld  bc,0        ;Const to mask in attributes
+    ld  de,-256+8   ;Const to move scrnbufptr to one line above
+ppu_fullTile_jumpTable  .equ $+1
+    jp $
+    ld  hl,(iy+64- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+64- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+56- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+56- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+48- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+48- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+40- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+40- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+32- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+32- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+24- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+24- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+16- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+16- 8)   \   add hl,bc   \   inc sp  \   push hl
+    sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+    ld  hl,(iy+ 8- 3)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 6)   \   add hl,bc   \   push hl
+    ld  hl,(iy+ 8- 8)   \   add hl,bc   \   inc sp  \   push hl
+    ;sbc hl,hl \ add hl,de \ add hl,sp   \   ld  sp,hl
+ppu_fullTile_resetScrnBuf .equ $+1
+    ld  hl,(256*7)+16
+    add hl,sp
+    ld  sp,hl
+    exx
+;The label below shares with edge routines to save some space.
+ppu_fullTile_horizontalRecalibration:
+    ;
+    ; Horizontal movement handling
+    ;
+    ld  a,e
+    inc e
+    xor a,e
+    bit 5,a     ;A carry in X would result in a change in bit 5
+    jr  z,+_    ;A jump here means that bit 5 didn't change. X still in range.
+    and a,%11100000     ;retain old Y values from A
+    xor a,e             ;keeping only the changes made in the low bits.
+    ld  c,a     ;And now let's squirrel this and...
+    ld  b,d     ;...D for later merge magic
+    ld  a,L
+    xor a,%00000100 ;flip to the next horizontal buffer...
+    ld  L,a
+    ld  de,(hl)
+    ld  e,c
+    ld  a,b
+    xor a,d         ;
+    and a,%00000011 ;write high bits of D, keeping old Y values
+    xor a,d
+    ld  d,a         ;and map coords into a new nametable
+_:  dec (ix+PPU_HCOUNT)
+ppu_fullTile_returnTarget .equ $+1
+    jp  z,$
+ppu_fullTile_adjustAttribute:
+    ;Detect changes needed in nametable adjustment
+    ld  a,e
+    dec a
+    xor a,e
+    rrca
+    rrca    ;bit 1. Jump to fine adjust if set (carry)
+    jr  c,ppu_fullTile_fineAdjust
+    rrca    ;bit 2. Jump to coarse adjust if set (carry)
+    jr  c,ppu_fullTile_coarseAdjust
+ppu_fullTile_loopbackNode:
+    jp ppu_fullTile_entry
+ppu_fullTile_coarseAdjust
+    ;Coarse adjust: Obtain new byte
+    ld  c,e
+    ld  b,d ;preserve nametable pointer in BC
+    ld  a,d
+    rra
+    rr e
+    rra
+    rr e    ;YYYYYXXX
+    set 0,d
+    set 1,d
+    ld  a,e
+    rrca
+    rrca
+    or  a,%11000000
+    xor a,e
+    and a,%11111000
+    xor a,e
+    ld  e,a
+    ld  a,(de)
+    ld  (ix+PPU_ATTRIBUTE_CACHE),a
+    ld  e,c
+    ld  d,b     ;restore nametable pointer
+ppu_fullTile_fineAdjust
+    ld  a,(ix+PPU_ATTRIBUTE_CACHE)
+    bit 6,e
+    jr  z,$+6
+    rlca \ rlca \ rlca \ rlca
+    bit 1,e
+    jr  nz,$+4
+    rlca \ rlca
+    and a,%00001100
+    ld  (ppu_fullTile_attribMask+0),a
+    ld  (ppu_fullTile_attribMask+1),a
+    ld  (ppu_fullTile_attribMask+2),a
+    jr  ppu_fullTile_loopbackNode
+
+ppu_sideTileL_entry:
+    ld a,(de)
+ppu_sideTileL_mask .equ $+1+0
+ppu_sideTileL_loopCounter .equ $+1+1
+    ld  bc,0
+    exx
+    ld  b,a
+    ld  c,64
+    mlt bc
+ppu_sideTileL_spriteAdr  .equ $+1
+    ld  hl,0
+    add hl,bc
+    ex  de,hl
+    sbc hl,hl
+    add hl,sp
+    exx
+_:  ld  a,c
+    exx
+    ld  c,a
+ppu_sideTileL_jumpTable .equ $+1
+    jr  $
+    ;5 bytes per pixel drawn. Only need 7 here.
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+ppu_sideTileL_spriteSkip .equ $+1
+    ld  c,0
+    ex  de,hl
+    add hl,bc
+ppu_sideTileL_screenbufSkip .equ $+1
+    ld  c,0
+    ex  de,hl
+    add hl,bc
+    exx
+    djnz -_
+    exx
+ppu_sideTileL_resetBuf .equ $+1
+    ld  de,-1
+    add hl,de
+    ld  sp,hl
+    exx
+ppu_sideTileL_exitVector .equ $+1
+    jp  ppu_fullTile_horizontalRecalibration
+
+ppu_sideTileR_entry:
+    ld a,(de)
+ppu_sideTileR_mask .equ $+1+0
+ppu_sideTileR_loopCounter .equ $+1+1
+    ld  bc,0
+    exx
+    ld  b,a
+    ld  c,64
+    mlt bc
+ppu_sideTileR_spriteAdr  .equ $+1
+    ld  hl,0
+    add hl,bc
+    ex  de,hl
+    sbc hl,hl
+    add hl,sp
+    exx
+_:  ld  a,c
+    exx
+    ld  c,a
+ppu_sideTileR_jumpTable .equ $+1
+    jr  $
+    ;5 bytes per pixel drawn. Only need 7 here.
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+    ld a,(de) \ or a,c \ ld (hl),a \ inc hl \ inc de
+ppu_sideTileR_spriteSkip .equ $+1
+    ld  c,0
+    ex  de,hl
+    add hl,bc
+ppu_sideTileR_screenbufSkip .equ $+1
+    ld  c,0
+    ex  de,hl
+    add hl,bc
+    exx
+    djnz -_
+    exx
+ppu_sideTileR_resetBuf .equ $+1
+    ld  de,-1
+    add hl,de
+    ld  sp,hl
+    exx
+ppu_sideTileR_exitVector .equ $+1
+    jp  ppu_fullTile_horizontalRecalibration
+endautoreloc()
+ppu_fullTile_end:
+
+
+
 
 ;
 ppu_init:

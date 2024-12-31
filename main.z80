@@ -1,4 +1,5 @@
 #include "ti84pce.inc"
+#include "defs.inc"
 .org userMem-2
 .db $EF, $7B
 
@@ -17,7 +18,7 @@
 ;-H = Print this help message
 
 
-
+set_autoreloc_target(cursorImage, 1020)
 
 programStart:
     di
@@ -1293,3 +1294,4 @@ _:  call getkbd_adl
 programEnd:
 
 .echo "Main program size: ",$-programStart
+reportautoreloc()
