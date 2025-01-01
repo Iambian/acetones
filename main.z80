@@ -63,6 +63,10 @@ programStart:
     ; surrounding eZ80 data/code. Just... don't allow writes to it.
     ;
 
+    ld  a,DEFAULT_FRAMESKIP
+    ld  (frameskip),a
+    ld  (frameskip_counter),a
+
     ;Makes sure all non-ROM areas have a mapping
     ld  hl,scrap_mapping
     ld  bc,$008001

@@ -62,27 +62,20 @@ a6502_int_cancel_take:
     exx
     ret
 
+
+;==============================================================================
+;
+;       ## ## #### ## ##  ##  ### #   #     ## ##  ##  ###  ####  ###  
+;       ## ## #    ## ## #  # ## # # #      ## ## #  # #  # #    #     
+;       # # # ###  # # # #  # ###   #       # # # #  # #  # ###   ###  
+;       # # # #    # # # #  # # ##  #       # # # #  # #  # #        # 
+;       # # # #### # # #  ##  #  #  #       # # #  ##  ###  ####  ###  
+;
+;==============================================================================
+
 ;:You probably shouldn't.
 a6502_adrmode_read_imm:
     ld  a,(hl)
-    ret
-
-;Maybe not standalone either.
-a6502_adrmode_read_abs:
-    ld  c,(hl)
-    inc hl
-    inc e
-    jr  nz,+_
-    ld  a,c
-    inc d
-    ld  c,d
-    ld  b,BASETABLE_STRIDE
-    mlt bc
-    ld  hl,PAGETABLE
-    add hl,bc
-    ld  hl,(hl)
-    ld  c,a
-_:  ld  b,(hl)
     ret
 
 ;That ret is making it slow.
@@ -108,10 +101,580 @@ a6502_adrmode_read_zpy:
     ld  a,(bc)
     ret
 
+;Oh yeah. It gets juicy.
+a6502_adrmode_read_abs:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  b,d
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    ld  hl,(hl)
+    add hl,bc
+_:  exx
+    ld  e,a         ;LSB
+    exx
+    ld  a,(hl)
+    exx
+    ld  b,a
+    ld  d,a
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ret                     ;D=MSB, C=LSB, HL=address
+
 a6502_adrmode_read_absx:
+    ld  a,(hl)              ;read first byte of abs val
+    inc hl
+    inc e
+    jr  nz,+_               ;and adjust page if needed
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  c,BASETABLE_STRIDE
+    ld  b,d
+    mlt bc
+    add hl,bc
+_:  exx
+    add a,(ix+REGX)         ;add X to abs lsb
+    ld  e,a                 ;and store to shadow E
+    exx
+    ld  a,(hl)              ;read second byte of abs val
+    exx
+    jr  nc,+_               ;adjust timing if page increment
+    ADDCYC(1)
+    inc a
+_:  ld  b,a                 ;MSB to page lookup. MSB peserved to A
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)             ;page address found
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ld  d,a                 ;D=MSB, C=LSB, HL=address
+    ret
+
+a6502_adrmode_read_absy:
+    ld  a,(hl)          ;fetch LSB of abs val
+    inc hl
+    inc e
+    jr  nz,+_           ;page adjust if needed
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  c,BASETABLE_STRIDE
+    ld  b,d
+    mlt bc
+    add hl,bc
+_:  exx
+    add a,(ix+REGY)
+    ld  e,a                 ;and store to shadow E
+    exx
+    ld  a,(hl)              ;read second byte of abs val
+    exx
+    jr  nc,+_               ;adjust timing if page increment
+    ADDCYC(1)
+    inc a
+_:  ld  b,a                 ;MSB to page lookup. MSB peserved to A
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)             ;page address found
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ld  d,a                 ;D=MSB, C=LSB, HL=address
+    ret
+
+;Much the same as above, but does not adjust cycle count on page crossing
+a6502_adrmode_write_absx:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  c,BASETABLE_STRIDE
+    ld  b,d
+    mlt bc
+    add hl,bc
+_:  exx
+    add a,(ix+REGX)
+    ld  e,a     ;LSB
+    exx
+    ld  a,(hl)
+    exx
+    adc a,0     ;MSB adjusted if needed
+    ld  b,a     ;MSB D and A
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ld  d,a     ;D=MSB, C=LSB, HL=address
+    ret
+
+
+a6502_adrmode_write_absy:
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  c,BASETABLE_STRIDE
+    ld  b,d
+    mlt bc
+    add hl,bc
+_:  exx
+    add a,(ix+REGY)
+    ld  e,a     ;LSB
+    exx
+    ld  a,(hl)
+    exx
+    adc a,0     ;MSB adjusted if needed
+    ld  b,a     ;MSB D and A
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ld  d,a     ;D=MSB, C=LSB, HL=address
+    ret
+
+a6502_adrmode_read_indx:
+    ld  a,(hl)
+    exx
+    ld  hl,ZEROPAGE
+    add a,(ix+REGX)
+    ld  L,a
+    ld  a,(hl)
+    inc L
+    ld  d,(hl)
+    ld  b,d
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,a
+    add hl,bc
+    ret
+
+a6502_adrmode_read_indy:
+    ld  a,(hl)
+    exx
+    ld  hl,ZEROPAGE
+    ld  L,a
+    ld  a,(hl)
+    inc L
+    add a,(ix+REGY)
+    ld  b,(hl)
+    jr  nc,+_
+    ADDCYC(1)
+    inc b
+_:  ld  d,b
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,a
+    add hl,bc
+    ret         ;D=MSB C=LSB HL=address
+
+a6502_adrmode_write_indy:
+    ld  a,(hl)
+    exx
+    ld  hl,ZEROPAGE
+    ld  L,a
+    ld  a,(hl)
+    inc L
+    add a,(ix+REGY)
+    ld  e,a         ;LSB
+    ld  a,(hl)
+    adc a,0
+    ld  d,a
+    ld  b,a
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    ret         ;D=MSB C=LSB HL=address
+
+
+;==============================================================================
+;
+; #   #  #  ##  ### ##   ### ##  #  ## ### ###  # #  ## ### ###  ##  ##  #  ## 
+; ## ## # # # # #   # #   #  ##  # #    #  #  # # # #    #   #  #  # ##  # #   
+; # # # # # # # ##  # #   #  # # #  ##  #  ###  # # #    #   #  #  # # # #  ## 
+; #   # # # # # #   # #   #  #  ##    # #  #  # # # #    #   #  #  # #  ##    #
+; #   #  #  ##  ### ##   ### #  ##  ##  #  #  # ###  ##  #  ###  ##  #  ##  ## 
+;
+;==============================================================================
+; * For read-only instructions, you accept data in register A. The constructor
+;   will have a read or read/write opener that outputs data to A, and flips
+;   the registers to the nonshadow versions by the time it is receieved.
+; * For instructions containing writes, they come in two forms:
+;   1. Write-to-(BC)
+;       These aren't gated, and the data in (BC) is also in A. Best to use A
+;       since I think there's a few illegals that takes immediate data too.
+;   2. Write-to-(HL).
+;       All registers incoming are shadow registers. Your free and available
+;       registers are thus B and E.
+;       Read-accesses are passed in through register A, for which you do ops.
+;       Write-accesses are passed in through register B to input D=MSB, C=LSB,
+;           and HL=address.
+;       DO NOT EXX AT THE END. THE RETURN-TO-INSTRUCTION-FETCHER WILL DO THAT.
 
 
 
+;------------------------------------------
+a6502_inst_lda:
+    ld  (ix+REGA),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_ldx:
+    ld  (ix+REGX),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_ldy:
+    ld  (ix+REGY),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_sta_bc:
+    ld  a,(ix+REGA)
+    ld  (bc),a
+    ret
+
+a6502_inst_sta_hl:
+    ld  b,(ix+REGA)
+    ret
+;------------------------------------------
+a6502_inst_stx_bc:
+    ld  a,(ix+REGX)
+    ld  (bc),a
+    ret
+
+a6502_inst_stx_hl:
+    ld  b,(ix+REGX)
+    ret
+;------------------------------------------
+a6502_inst_sty_bc:
+    ld  a,(ix+REGY)
+    ld  (bc),a
+    ret
+
+a6502_inst_sty_hl:
+    ld  b,(ix+REGY)
+    ret
+;------------------------------------------
+a6502_inst_dec_bc:
+    dec a
+    ld  (bc),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+
+a6502_inst_dec_hl:
+    ld  b,a
+    ex  af,af'
+    dec b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_inc_bc:
+    inc a
+    ld  (bc),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+
+a6502_inst_inc_hl:
+    ld  b,a
+    ex  af,af'
+    inc b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_adc_bc:
+a6502_inst_adc_hl:
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    adc a,b
+    ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_sbc_bc:
+a6502_inst_sbc_hl:
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    ccf
+    sbc a,b
+    ccf
+    ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_and_bc:
+a6502_inst_and_hl:
+    ld  b,a
+    ex  af,af'
+    adc a,a
+    ld  c,a     ;preserve carry flag
+    ld  a,(ix+REGA)
+    and a,b
+    ld  (ix+REGA),a
+    bit 0,c
+    jr  z,+_
+    scf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_eor_bc:
+a6502_inst_eor_hl:
+    ld  b,a
+    ex  af,af'
+    adc a,a
+    ld  c,a     ;preserve carry flag
+    ld  a,(ix+REGA)
+    xor a,b
+    ld  (ix+REGA),a
+    bit 0,c
+    jr  z,+_
+    scf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_or_bc:
+a6502_inst_or_hl:
+    ld  b,a
+    ex  af,af'
+    adc a,a
+    ld  c,a     ;preserve carry flag
+    ld  a,(ix+REGA)
+    or  a,b
+    ld  (ix+REGA),a
+    bit 0,c
+    jr  z,+_
+    scf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_asl_bc:
+    ld  d,a
+    ex  af,af'
+    sla d
+    ex  af,af'
+    ld  a,d
+    ld  (bc),a
+    ret
+
+a6502_inst_asl_hl:
+    ld  b,a
+    ex  af,af'
+    sla b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_lsr_bc:
+    ld  d,a
+    ex  af,af'
+    srl d
+    ex  af,af'
+    ld  a,d
+    ld  (bc),a
+    ret
+
+a6502_inst_lsr_hl:
+    ld  b,a
+    ex  af,af'
+    srl b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_rol_bc:
+    ld  d,a
+    ex  af,af'
+    rl  d
+    ex  af,af'
+    ld  a,d
+    ld  (bc),a
+    ret
+
+a6502_inst_rol_hl:
+    ld  b,a
+    ex  af,af'
+    rl  b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_ror_bc:
+    ld  d,a
+    ex  af,af'
+    rr  d
+    ex  af,af'
+    ld  a,d
+    ld  (bc),a
+    ret
+
+a6502_inst_ror_hl:
+    ld  b,a
+    ex  af,af'
+    rr  b
+    ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_cmp_bc:
+a6502_inst_cmp_hl:
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    sub a,b
+    ccf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_cpx_bc:
+a6502_inst_cpx_hl:
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGX)
+    sub a,b
+    ccf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+a6502_inst_cpy_bc:
+a6502_inst_cpy_hl:
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGY)
+    sub a,b
+    ccf
+_:  ex  af,af'
+    ret
+;------------------------------------------
+
+
+
+
+
+
+;==============================================================================
+;
+;  ##  ##  ### ## #  #  #    # ##  #  ## ### ###  # #  ## ### #  ##  ##  #  ## 
+; #    # # #  #   # # # #    # ##  # #    #  #  # # # #    #  # #  # ##  # #   
+;  ##  ##  ## #   # ### #    # # # #  ##  #  ###  # # #    #  # #  # # # #  ## 
+;    # #   #  #   # # # #    # #  ##    # #  #  # # # #    #  # #  # #  ##    #
+;  ##  #   ### ## # # # ###  # #  ##  ##  #  #  # ###  ##  #  #  ##  #  ##  ## 
+;
+;==============================================================================
+; One or more of the following may be true about the instructions below:
+; * It supports exactly one memory mode:
+;       (e.g.) any transfer instruction (tax, txa, ...), flag instructions, etc.
+; * The generalisation is either inefficient, or would make a giant mess to
+;   try to clean up.
+;       (e.g.) basically all branch and branch-adjacent instructions
+a6502_inst_tax:
+a6502_inst_tay:
+a6502_inst_tsx:
+a6502_inst_txa:
+a6502_inst_txs: ;flags not affected
+a6502_inst_tya:
+a6502_inst_pha: ;flags not affected
+a6502_inst_php: ;you must construct flags to push to stack
+a6502_inst_pla:
+a6502_inst_plp: ;you must deconstruct flags back to native order
+a6502_inst_dex:
+a6502_inst_dey:
+a6502_inst_inx:
+a6502_inst_iny:
+a6502_inst_asl: ;it has other memory modes, but this one operates on reg A too.
+a6502_inst_lsr: ;it has other memory modes, but this one operates on reg A too.
+a6502_inst_rol: ;it has other memory modes, but this one operates on reg A too.
+a6502_inst_ror: ;it has other memory modes, but this one operates on reg A too.
+a6502_inst_clc:
+a6502_inst_cld:
+a6502_inst_cli:
+a6502_inst_clv:
+a6502_inst_sec:
+a6502_inst_sed:
+a6502_inst_sei:
+a6502_inst_bcc:
+a6502_inst_bcs:
+a6502_inst_beq:
+a6502_inst_bmi:
+a6502_inst_bne:
+a6502_inst_bpl:
+a6502_inst_bvc:
+a6502_inst_bvs:
+a6502_inst_brk:
+a6502_inst_rti:
+a6502_inst_jmp_abs:
+a6502_inst_jmp_ind:
+a6502_inst_jsr:
+a6502_inst_rts:
+a6502_inst_nop: ;$EA. There are many other NOPs with their own timings and modes
+a6502_inst_bit_zp:  ;These two instructions *would* use normal modes, but what
+a6502_inst_bit_abs: ;they do to the flags is beyond reason. Real stack required.
 
 
 

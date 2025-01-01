@@ -11,7 +11,7 @@
 
 DEBUG_PRINT_START_CYCLE .equ 0
 DEBUG_STEP_START_CYCLE  .equ 30000 ;26485
-
+DEFAULT_FRAMESKIP .equ 4
 
 
 FONTFGCOLOR .EQU $FF ;$29
@@ -91,6 +91,8 @@ ppu_smc_gate_stack  .equ ppu_smc_gate_ports+1   ;1b smc target to event stack wr
 chr_rom_cachefrom_A .equ ppu_smc_gate_stack+1   ;3b. source of cache in bank 1
 chr_rom_cachefrom_B .equ chr_rom_cachefrom_A+3  ;3b. source of cache in bank 2
 timings_base        .equ chr_rom_cachefrom_B+3  ;3b. Current pointer to timings
+frameskip           .equ timings_base+3         ;1b. Max value of frameskip
+frameskip_counter   .equ frameskip+1            ;1b. Current value of frameskip
 
 SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
@@ -100,7 +102,7 @@ MAPPER_STRIDE       .equ 9
 
 MAXNUMFILES         .equ 1                  ;set to 32 later. that's like 1.5MB
 FILETABLE_STRIDE    .equ 8
-FILETABLE           .equ timings_base+3   ;(MAXNUMFILES*FILETABLE_STRIDE)b
+FILETABLE           .equ frameskip_counter+1 ;(MAXNUMFILES*FILETABLE_STRIDE)b
 FILE_SIZE_OFFSET    .equ 0
 FILE_ADR_OFFSET     .equ 2
 FILE_SIG_ADR_OFFSET .equ 5
