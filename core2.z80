@@ -4,17 +4,9 @@
 .org usermem-2
 .db $EF, $7B
 
-CALLTABLE_BASE = $D08000
-CALLTABLE_MAX_NUMCALLS_PER_CELL = 5
-CALLTABLE_STRIDE = 3*CALLTABLE_MAX_NUMCALLS_PER_CELL
-CALLTABLE_SIZE = 256*CALLTABLE_STRIDE
 
 
-
-
-
-
-
+a6502_module_start:
 a6502_init:
     ;stuff
     ;stuff
@@ -26,50 +18,112 @@ a6502_init:
     exx
     exx
 
+    call a6502_flagsToNativeLUTGen
 
-
-
-
-
-
-
-
+;------------------------------
+a6502_getInstruction_exx:
+    exx
+    jr  a6502_getInstruction
+;------------------------------
+a6502_newfetch_pagecross:
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  b,d
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    ld  hl,(hl)
+    jr  a6502_newfetch_continue
+;------------------------------
+a6502_nextargfetch_pagecross:
+    ld  d,(ix+REGPC+1)
+    inc d
+    ld.s (ix+REGPC),de
+    ld  b,d
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    ld  hl,(hl)
+    jr  a6502_nextargfetch_continue
+;------------------------------
+a6502_newfetch_exx:
+    exx
+a6502_newfetch:
+    inc hl
+    inc e
+    jr  z,a6502_newfetch_pagecross
+a6502_newfetch_continue:
 a6502_getInstruction:
     ld  a,(hl)
     inc hl
     inc e
-    jr  nz,+_
-    ld  d,(ix+REGPC+1)
-    inc d
-    ld.s (ix+REGPC),de
-    ld  c,d
-    ld  b,BASETABLE_STRIDE
-    mlt bc
-    ld  hl,PAGETABLE
-    add hl,bc
-    ld  hl,(hl)
-_:  exx
+    jr  z,a6502_nextargfetch_pagecross
+a6502_nextargfetch_continue:
+    exx
 a6502_int_timer         .equ $+1
     ld  bc,-27939
     add hl,bc
     jr  c,a6502_int_take
 a6502_int_cancel_take:
     ld  L,a
-    ld  h,CALLTABLE_STRIDE
-    ld  sp,CALLTABLE_BASE
+    ld  h,BASETABLE_STRIDE
+    ld  sp,CALLTABLE
     add hl,sp
     ld  sp,hl
     exx
     ret
 
+a6502_int_take:
+    jr  a6502_int_cancel_take
+
+;##############################################################################
+
+;          ###  #   # ####  ####   ###  #   # ##### # ##  # #####  ###             
+;         #     #   # #   # #   # #   # #   #   #   # ##  # #     # 
+;          ###  #   # ####  ####  #   # #   #   #   # # # # ###    ###          
+;             # #   # #   # #   # #   # #   #   #   # #  ## #         #       
+;          ###   ###  ####  #   #  ###   ###    #   # #  ## #####  ###                             
+
+;##############################################################################
+
+;Call this during init.
+;Src: [12-- --34]  => [13-- -2-4]
+a6502_flagsToNativeLUTGen:
+    ld  hl,flags6502toNativeLUT
+_:  ld  c,l     ;keep original copy in C, for final step
+    ld  a,l
+    rlca
+    rlca
+    rlca
+    rlca   
+    ld  b,a     ;bit 2 moved into position.
+    rlca        ;bit 3 moved into position
+    xor a,b
+    and a,%11111011 ;Eh. Just trust me on this one. we have src 2 and 3 in place
+    xor a,b
+    xor a,c
+    and a,%01111110 ;src 1 and 4 hasn't moved, so put them in place.
+    xor a,c
+    ld  (hl),a      ;z80 maskout value %00111010 with LUT not-A operand on xor.
+    inc l
+    jr  nz,-_
+    ret
+
+    
+    
+
+
+
+
 
 ;==============================================================================
 ;
-;       ## ## #### ## ##  ##  ### #   #     ## ##  ##  ###  ####  ###  
-;       ## ## #    ## ## #  # ## # # #      ## ## #  # #  # #    #     
-;       # # # ###  # # # #  # ###   #       # # # #  # #  # ###   ###  
-;       # # # #    # # # #  # # ##  #       # # # #  # #  # #        # 
-;       # # # #### # # #  ##  #  #  #       # # #  ##  ###  ####  ###  
+;    #   # ##### #   #  ###  #### #   #     #   #  ###  ####  #####  ###  
+;    ## ## #     ## ## #   # #   # # #      ## ## #   # #   # #     #     
+;    # # # ###   # # # #   # ####   #       # # # #   # #   # ###    ###  
+;    # # # #     # # # #   # #  ##  #       #   # #   # #   # #         # 
+;    #   # ##### #   #  ###  #   #  #       #   #  ###  ####  #####  ###  
 ;
 ;==============================================================================
 
@@ -612,10 +666,296 @@ a6502_inst_cpy_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+a6502_inst_bit_bc:  ;Only zp uses this.
+a6502_inst_bit_hl:  ;Only abs uses this.
+    ld  c,a
+    and a,(ix+REGA)
+    ld  a,c
+    res SF_ZERO,a
+    jr  nz,+_
+    set SF_ZERO,a
+_:  ld  bc,flags6502toNativeLUT
+    ld  c,a         ;NZ-V bits now in-place. Gotta shuffle C in too. Pull native
+    ld  a,(bc)
+    rrca        ;preshift right to accept carry on next lshift.
+    ld  c,a
+    ex  af,af'
+    rl c
+    push.s bc
+    pop.s af    ;flags reestablished.
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
 
 
+;-------------------------------------------------------------------------------
+; # #  #  ### ##  #  #     #  ##   ##  #  ##  ###  ##    #  #  ## ### # ##   ##                                      
+; # #  #  ## #   # # #    # # # # #   # # # # ##  #      #  # #    #  # # # #                               
+; # #  #  #  # # ### #    # # ##  #   # # # # #    ##    #  #  ##  #  # # # # #                                     
+; # ## ## ### ## # # ##    #  #    ##  #  ##  ### ##     ## # ##   #  # # #  ##                                       
+;-------------------------------------------------------------------------------
+ 
+a6502_inst_dcp_bc:
+    dec a
+    ld  (bc),a
+    ld  c,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    cp  a,c
+    ccf
+    ex  af,af'
+    ret
 
+;NOTE: a6502_inst_dcp_hl has special considerations, so must be special-cased
+;       during generation
+a6502_inst_dcp_hl_seg1: ;Placed after initial R/RMW access as normal.
+    dec a
+    ld  b,a
+    ld  (+_++1),a
+    ret
 
+a6502_inst_dcp_hl_seg2: ;Placed after the W access
+    ex  af,af'
+    ld  a,(ix+REGA)
+_:  cp  a,0     ;SMC'd for second segment.
+    ex  af,af'
+    ret
+
+;------------------------------------------------------------------------------
+a6502_inst_isc_bc:
+    inc a
+    ld  (bc),a
+    ld  c,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    ccf
+    sbc a,c
+    ccf
+    ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+
+;NOTE: a6502_inst_isc_hl also has special considerations,
+;        so must be special-cased during generation.
+a6502_inst_isc_hl_seg1: ;Placed after initial R/RMW access as normal.
+    dec a
+    ld  b,a
+    ld  (+_+1),a
+    ret
+
+a6502_inst_isc_hl_seg2: ;Placed after the W access
+    ex  af,af'
+    ccf
+_:  sbc a,0
+    ccf
+    ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+;------------------------------------------------------------------------------
+a6502_inst_lax_bc:
+a6502_inst_lax_hl:
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+;------------------------------------------------------------------------------
+;M = C <- [76543210] <- C, A AND M -> A. flags CZN
+;Flags juggling required to preserve C while doing (A AND M).
+a6502_inst_rla_bc:
+    ld  d,a
+    ex  af,af'
+    ld  a,d
+    rla             ;1st half oper once
+    ld  (bc),a
+    and a,(ix+REGA) ;2nd half oper
+    ld  (ix+REGA),a
+    push.s af
+    pop.s bc
+    srl c       ;prep flag for carry insert
+    rl d        ;1st half oper for carry
+    rl c        ;realign flags
+    push.s bc
+    pop.s af    ;flags set
+    ex  af,af'
+    ret
+
+a6502_inst_rla_hl_seg1:
+    ld  b,a
+    ex  af,af'
+    rl  b
+    ld  a,b
+    ld  (+_+1),a
+    ex  af,af'
+    ret
+
+a6502_inst_rla_hl_seg2:
+    ld  a,(ix+REGA)
+_:  and a,0
+    ld  (ix+REGA),a
+    push.s af
+    ex  af,af'
+    adc a,a
+    pop.s bc
+    srl c
+    rrca
+    rl c
+    push.s bc
+    pop.s af
+    ex  af,af'
+    ret
+;------------------------------------------------------------------------------
+;RRA
+;ROR oper + ADC oper
+;M = C -> [76543210] -> C, A + M + C -> A, C. Affects VCZN
+
+a6502_inst_rra_bc:
+    ld  d,a
+    ex  af,af'
+    ld  a,d
+    rra
+    ld  (bc),a
+    adc a,(ix+REGA)
+    ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+
+a6502_inst_rra_hl_seg1:
+    ld  b,a
+    ex  af,af'
+    rl  b
+    ld  a,b
+    ex  af,af'
+    ret
+
+a6502_inst_rra_hl_seg2:
+    ex  af,af'
+    adc a,(ix+REGA)
+    ld  (ix+REGA),a
+    jp  po,+_
+    set SF_OVER,(ix+REGSR)
+_:  ex  af,af'
+    ret
+;------------------------------------------------------------------------------
+;SAX (AXS, AAX) - A AND X -> M
+;A and X are put on the bus at the same time (resulting effectively in an 
+;AND operation) and stored in M. Flags not affected.
+
+a6502_inst_sax_bc:
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    ld  (bc),a
+    ret
+
+a6502_inst_sax_hl:
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    ld  b,a
+    ret
+;------------------------------------------------------------------------------
+;SLO (ASO) - ASL oper + ORA oper
+;M = C <- [76543210] <- 0, A OR M -> A. Affects: CZN
+a6502_inst_slo_bc:
+    ld  d,a
+    ex  af,af'
+    ld  a,d
+    sla a           ;1st half oper once
+    ld  (bc),a
+    or  a,(ix+REGA) ;2nd half oper
+    ld  (ix+REGA),a
+    push.s af
+    pop.s bc
+    srl c       ;prep flag for carry insert
+    sla d       ;1st half oper for carry
+    rl c        ;realign flags
+    push.s bc
+    pop.s af    ;flags set
+    ex  af,af'
+    ret
+
+a6502_inst_slo_hl_seg1:
+    ld  b,a
+    ex  af,af'
+    sla b
+    ld  a,b
+    ld  (+_+1),a
+    ex  af,af'
+    ret
+
+a6502_inst_slo_hl_seg2:
+    ld  a,(ix+REGA)
+_:  or  a,0
+    ld  (ix+REGA),a
+    push.s af
+    ex  af,af'
+    adc a,a
+    pop.s bc
+    srl c
+    rrca
+    rl c
+    push.s bc
+    pop.s af
+    ex  af,af'
+    ret
+;-----------------------------------------------------------------------------
+;SRE (LSE) - LSR oper + EOR oper
+;M = 0 -> [76543210] -> C, A EOR M -> A. Affects: CZN
+a6502_inst_sre_bc:
+    ld  d,a
+    ex  af,af'
+    ld  a,d
+    srl a           ;1st half oper once
+    ld  (bc),a
+    xor a,(ix+REGA) ;2nd half oper
+    ld  (ix+REGA),a
+    push.s af
+    pop.s bc
+    srl c       ;prep flag for carry insert
+    srl d       ;1st half oper for carry
+    rl c        ;realign flags
+    push.s bc
+    pop.s af    ;flags set
+    ex  af,af'
+    ret
+
+a6502_inst_sre_hl_seg1:
+    ld  b,a
+    ex  af,af'
+    srl b
+    ld  a,b
+    ld  (+_+1),a
+    ex  af,af'
+    ret
+
+a6502_inst_sre_hl_seg2:
+    ld  a,(ix+REGA)
+_:  xor a,0
+    ld  (ix+REGA),a
+    push.s af
+    ex  af,af'
+    adc a,a
+    pop.s bc
+    srl c
+    rrca
+    rl c
+    push.s bc
+    pop.s af
+    ex  af,af'
+    ret
 
 
 ;==============================================================================
@@ -673,8 +1013,466 @@ a6502_inst_jmp_ind:
 a6502_inst_jsr:
 a6502_inst_rts:
 a6502_inst_nop: ;$EA. There are many other NOPs with their own timings and modes
-a6502_inst_bit_zp:  ;These two instructions *would* use normal modes, but what
-a6502_inst_bit_abs: ;they do to the flags is beyond reason. Real stack required.
+    ret
 
 
 
+;-------------------------------------------------------------------------------
+; # #  #  ### ##  #  #     #  ##   ##  #  ##  ###  ##    #  #  ## ### # ##   ##                                      
+; # #  #  ## #   # # #    # # # # #   # # # # ##  #      #  # #    #  # # # #                               
+; # #  #  #  # # ### #    # # ##  #   # # # # #    ##    #  #  ##  #  # # # # #                                     
+; # ## ## ### ## # # ##    #  #    ##  #  ##  ### ##     ## # ##   #  # # #  ##                                       
+;-------------------------------------------------------------------------------
+;Unofficial instructions. Surprisingly many of them are usable. A few are
+;unstable. A few more will lokk up the CPU, making their use for alternate
+;emulator-specific purposes an appealing idea. HINT HINT NUDGE NUDGE.
+;
+a6502_inst_alr:     ;imm, opc $4B
+    ex  af,af'
+    ld  a,(ix+REGA)
+    and a,(hl)
+    srl a
+    ld  (ix+REGA),a
+    ex  af,af'
+    ret
+
+a6502_inst_anc:     ;imm, opc $0B
+a6502_inst_anc2:    ;imm, opc $2B
+    ld  a,(ix+REGA)
+    and a,(hl)
+    ld  (ix+REGA),a
+    ld  c,a
+    ex  af,af'
+    rl  c       ;Just affect flags.
+    ex  af,af'
+    ret
+
+a6502_inst_ane:     ;imm, opc $88. Highly unstable. But probably implementable.
+    ld  a,r
+    or  a,(ix+REGA)
+    and a,(ix+REGX)
+    and a,(hl)
+    ld  (ix+REGA),a
+    ld  c,a
+    ex  af,af'
+    inc c
+    dec c
+    ex  af,af'
+    ret
+
+a6502_inst_arr:     ;imm, opc $6B
+    ld  a,(ix+REGA)
+    and a,(hl)
+    ld  c,a ;oldval
+    ex  af,af'
+    rr  c
+    ld  a,c
+    add a,a
+    xor a,c ;V check. V=b5^b6.
+    res SF_OVER,(ix+REGSR)
+    jr  z,+_
+    set SF_OVER,(ix+REGSR)
+_:  ld  a,c
+    add a,a
+    add a,a ;C check. Puts bit 6 into carry
+    inc c
+    dec c   ;Sets N and Z appropriately.
+    ex  af,af'
+    ret
+
+a6502_inst_las:     ;absy, opc $BB. Prefix with normal absy. Read access only.
+    and a,(ix+REGSP)
+    ld  c,a
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    ld  (ix+REGSP),a
+    ex  af,af'
+    inc c
+    dec c
+    ex  af,af'
+    ret
+
+a6502_inst_lxa:     ;imm, opc $AB. Highly unstable. See ANE.
+    ld  a,r     ;?? HIGHLY UNSTABLE INSTRUCTION
+    or  a,(ix+REGA)
+    and a,(hl)
+    ld  (ix+REGA),a
+    ld  (ix+REGX),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+    
+a6502_inst_sbx:     ;imm, opc $CB. (A AND X) - oper -> X. flags CZN
+    ld  b,a
+    ex  af,af'
+    ld  a,(ix+REGA)
+    and a,(ix+REGX)
+    sub a,b
+    ld  (ix+REGX),a
+    ccf
+    ex  af,af'
+    ret
+
+a6502_inst_sha:     ;9F, 93
+a6502_inst_shx:     ;9E
+a6502_inst_shy:     ;9C
+a6502_inst_tas:     ;9B
+a6502_inst_usbc:    ;EB Map this to instruction $E9 (inst6502_sbc_imm)
+    ret
+
+
+
+
+
+
+
+
+a6502_main_table:
+A6502T(MEMACC_NO, ADRMODE_SPEC, 7, ISC_BRK)    ;00
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_ORA)    ;01
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;02
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_SLO)    ;03
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;04
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_ORA)    ;05
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ASL)    ;06
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_SLO)    ;07
+A6502T(MEMACC_NO, ADRMODE_SPEC, 3, ISC_PHP)    ;08
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ORA)    ;09
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_ASLA)    ;0A
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ANC)    ;0B
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_JAMX)    ;0C
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_ORA)    ;0D
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ASL)    ;0E
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_SLO)    ;0F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BPL)    ;10
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ORA)    ;11
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;12
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_SLO)    ;13
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;14
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ORA)    ;15
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ASL)    ;16
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SLO)    ;17
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLC)    ;18
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ORA)    ;19
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;1A
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_SLO)    ;1B
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;1C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ORA)    ;1D
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ASL)    ;1E
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_SLO)    ;1F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_JSR)    ;20
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_AND)    ;21
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;22
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_RLA)    ;23
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_BIT)    ;24
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_AND)    ;25
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ROL)    ;26
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_RLA)    ;27
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_PLP)    ;28
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_AND)    ;29
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_ROLA)    ;2A
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ANC)    ;2B
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_BIT)    ;2C
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_AND)    ;2D
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ROL)    ;2E
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_RLA)    ;2F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BMI)    ;30
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_AND)    ;31
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;32
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_RLA)    ;33
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;34
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_AND)    ;35
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROL)    ;36
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RLA)    ;37
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEC)    ;38
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_AND)    ;39
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;3A
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_RLA)    ;3B
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;3C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_AND)    ;3D
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ROL)    ;3E
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_RLA)    ;3F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTI)    ;40
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_EOR)    ;41
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;42
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_SRE)    ;43
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;44
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_EOR)    ;45
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_LSR)    ;46
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_SRE)    ;47
+A6502T(MEMACC_NO, ADRMODE_SPEC, 3, ISC_PHA)    ;48
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_EOR)    ;49
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_LSRA)    ;4A
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ALR)    ;4B
+A6502T(MEMACC_NO, ADRMODE_SPEC, 3, ISC_JMPA)    ;4C
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_EOR)    ;4D
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_LSR)    ;4E
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_SRE)    ;4F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVC)    ;50
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_EOR)    ;51
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;52
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_SRE)    ;53
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;54
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_EOR)    ;55
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_LSR)    ;56
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SRE)    ;57
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLI)    ;58
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_EOR)    ;59
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;5A
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_SRE)    ;5B
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;5C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_EOR)    ;5D
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_LSR)    ;5E
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_SRE)    ;5F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTS)    ;60
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_ADC)    ;61
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;62
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_RRA)    ;63
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;64
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_ADC)    ;65
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ROR)    ;66
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_RRA)    ;67
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_PLA)    ;68
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ADC)    ;69
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_RORA)    ;6A
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ARR)    ;6B
+A6502T(MEMACC_NO, ADRMODE_SPEC, 5, ISC_JMPI)    ;6C
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_ADC)    ;6D
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ROR)    ;6E
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_RRA)    ;6F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVS)    ;70
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ADC)    ;71
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;72
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_RRA)    ;73
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;74
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ADC)    ;75
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROR)    ;76
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RRA)    ;77
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEI)    ;78
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ADC)    ;79
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;7A
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_RRA)    ;7B
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;7C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ADC)    ;7D
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ROR)    ;7E
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_RRA)    ;7F
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;80
+A6502T(MEMACC_W , ADRMODE_INDX, 6, ISC_STA)    ;81
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;82
+A6502T(MEMACC_W , ADRMODE_INDX, 6, ISC_SAX)    ;83
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STY)    ;84
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STA)    ;85
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STX)    ;86
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_SAX)    ;87
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_DEY)    ;88
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;89
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TXA)    ;8A
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ANE)    ;8B
+A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STY)    ;8C
+A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STA)    ;8D
+A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STX)    ;8E
+A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_SAX)    ;8F
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BCC)    ;90
+A6502T(MEMACC_W , ADRMODE_INDY, 6, ISC_STA)    ;91
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;92
+A6502T(MEMACC_RW, ADRMODE_INDY, 6, ISC_SHA)    ;93
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_STY)    ;94
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_STA)    ;95
+A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_STX)    ;96
+A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_SAX)    ;97
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TYA)    ;98
+A6502T(MEMACC_W , ADRMODE_ABSY, 5, ISC_STA)    ;99
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TXS)    ;9A
+A6502T(MEMACC_R , ADRMODE_ABSY, 5, ISC_TAS)    ;9B
+A6502T(MEMACC_R , ADRMODE_ABSX, 5, ISC_SHY)    ;9C
+A6502T(MEMACC_W , ADRMODE_ABSX, 5, ISC_STA)    ;9D
+A6502T(MEMACC_R , ADRMODE_ABSY, 5, ISC_SHX)    ;9E
+A6502T(MEMACC_RW, ADRMODE_ABSY, 5, ISC_SHA)    ;9F
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LDY)    ;A0
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_LDA)    ;A1
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LDX)    ;A2
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_LAX)    ;A3
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_LDY)    ;A4
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_LDA)    ;A5
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_LDX)    ;A6
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_LAX)    ;A7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TAY)    ;A8
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LDA)    ;A9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TAX)    ;AA
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LXA)    ;AB
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_LDY)    ;AC
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_LDA)    ;AD
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_LDX)    ;AE
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_LAX)    ;AF
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BCS)    ;B0
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_LDA)    ;B1
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;B2
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_LAX)    ;B3
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_LDY)    ;B4
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_LDA)    ;B5
+A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_LDX)    ;B6
+A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_LAX)    ;B7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLV)    ;B8
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LDA)    ;B9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TSX)    ;BA
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LAS)    ;BB
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_LDY)    ;BC
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_LDA)    ;BD
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LDX)    ;BE
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LAX)    ;BF
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CPY)    ;C0
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_CMP)    ;C1
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;C2
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_DCP)    ;C3
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CPY)    ;C4
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CMP)    ;C5
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_DEC)    ;C6
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_DCP)    ;C7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_INY)    ;C8
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CMP)    ;C9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_DEX)    ;CA
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_SBX)    ;CB
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_CPY)    ;CC
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_CMP)    ;CD
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_DEC)    ;CE
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_DCP)    ;CF
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BNE)    ;D0
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_CMP)    ;D1
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;D2
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_DCP)    ;D3
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;D4
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_CMP)    ;D5
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DEC)    ;D6
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DCP)    ;D7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLD)    ;D8
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_CMP)    ;D9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;DA
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_DCP)    ;DB
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;DC
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_CMP)    ;DD
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_DEC)    ;DE
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_DCP)    ;DF
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CPX)    ;E0
+A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_SBC)    ;E1
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;E2
+A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_ISC)    ;E3
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CPX)    ;E4
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_SBC)    ;E5
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_INC)    ;E6
+A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ISC)    ;E7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_INX)    ;E8
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_SBC)    ;E9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOP)    ;EA
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_SBC)    ;EB
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_CPX)    ;EC
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_SBC)    ;ED
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_INC)    ;EE
+A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ISC)    ;EF
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BEQ)    ;F0
+A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_SBC)    ;F1
+A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;F2
+A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_ISC)    ;F3
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;F4
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_SBC)    ;F5
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_INC)    ;F6
+A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ISC)    ;F7
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SED)    ;F8
+A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_SBC)    ;F9
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;FA
+A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_ISC)    ;FB
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;FC
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_SBC)    ;FD
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_INC)    ;FE
+A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ISC)    ;FF
+
+a6502_norm_func_table:
+.dl         ;ISC_SRE .equ 0
+.dl
+.dl         ;ISC_SLO .equ 1
+.dl
+.dl         ;ISC_TAS .equ 2
+.dl
+.dl         ;ISC_SHY .equ 3
+.dl
+.dl         ;ISC_SHX .equ 4
+.dl
+.dl         ;ISC_SHA .equ 5
+.dl
+.dl         ;ISC_SBX .equ 6
+.dl
+.dl         ;ISC_SAX .equ 7
+.dl
+.dl         ;ISC_RRA .equ 8
+.dl
+.dl         ;ISC_RLA .equ 9
+.dl
+.dl         ;ISC_LXA .equ 10
+.dl
+.dl         ;ISC_LAX .equ 11
+.dl
+.dl         ;ISC_LAS .equ 12
+.dl
+.dl         ;ISC_ISC .equ 13
+.dl
+.dl         ;ISC_DCP .equ 14
+.dl
+.dl         ;ISC_ARR .equ 15
+.dl
+.dl         ;ISC_ANE .equ 16
+.dl
+.dl         ;ISC_ANC .equ 17
+.dl
+.dl         ;ISC_ALR .equ 18
+.dl
+.dl         ;ISC_BIT .equ 19
+.dl
+.dl         ;ISC_CPY .equ 20
+.dl
+.dl         ;ISC_CPX .equ 21
+.dl
+.dl         ;ISC_CMP .equ 22
+.dl
+.dl         ;ISC_ROR .equ 23
+.dl
+.dl         ;ISC_ROL .equ 24
+.dl
+.dl         ;ISC_LSR .equ 25
+.dl
+.dl         ;ISC_ASL .equ 26
+.dl
+.dl         ;ISC_ORA .equ 27
+.dl
+.dl         ;ISC_EOR .equ 28
+.dl
+.dl         ;ISC_AND .equ 29
+.dl
+.dl         ;ISC_SBC .equ 30
+.dl
+.dl         ;ISC_ADC .equ 31
+.dl
+.dl         ;ISC_INC .equ 32
+.dl
+.dl         ;ISC_DEC .equ 33
+.dl
+.dl         ;ISC_STY .equ 34
+.dl
+.dl         ;ISC_STX .equ 35
+.dl
+.dl         ;ISC_STA .equ 36
+.dl
+.dl         ;ISC_LDY .equ 37
+.dl
+.dl         ;ISC_LDX .equ 38
+.dl
+.dl         ;ISC_LDA .equ 39
+.dl
+
+
+
+
+
+
+.echo "Core 2 module size: ",$-a6502_module_start

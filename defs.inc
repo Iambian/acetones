@@ -51,7 +51,9 @@ PAGETABLE_OFFSET    .equ 0
 PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
 JUMPTABLE_OFFSET    .equ 4
 JUMPTABLE           .equ BASETABLE+JUMPTABLE_OFFSET
-;USETABLE_OFFSET     .equ 8
+CALLTABLE_OFFSET    .equ 8
+CALLTABLE           .equ BASETABLE+CALLTABLE_OFFSET
+;USETABLE_OFFSET     .equ 8+21
 ;USETABLE            .equ BASETABLE+USETABLE_OFFSET
 
 
@@ -117,8 +119,14 @@ INT_CYCLE_OFFSET    .equ 3
 TABLESEND           .equ INT_TABLE+(INT_TABLE_MAXLEN*INT_TABLE_STRIDE)
 
 ;
+; Trailing edge of saferam1 allocations. LUTs and the like.
 ;
-;
+flags6502toNativeLUT    .equ    saferam1+1024-256
+
+
+
+
+
 
 ppuScreenBuf1       .equ vRam                       ;+$000000
 ppuScreenBuf2       .equ ppuScreenBuf1+(256*224)    ;+$00E000
@@ -341,16 +349,118 @@ OAM_VFLIP       .equ 7
 #endmacro
 
 
+MEMACC_NO       .equ 0
+MEMACC_R        .equ 1
+MEMACC_W        .equ 2
+MEMACC_RW       .equ 3
+
+ADRMODE_IMM     .equ 0
+ADRMODE_ZP      .equ 1
+ADRMODE_ZPX     .equ 2
+ADRMODE_ZPY     .equ 3
+ADRMODE_ABS     .equ 4
+ADRMODE_ABSX    .equ 5
+ADRMODE_ABSY    .equ 6
+ADRMODE_IND     .equ 7
+ADRMODE_INDX    .equ 8
+ADRMODE_INDY    .equ 9
+ADRMODE_ABSXF   .equ 10
+ADRMODE_ABSYF   .equ 11
+ADRMODE_INDYF   .equ 12
+ADRMODE_SPEC    .equ 13
+
+;%-III|IIIB|BBAA|AAMM
+#define A6A(macc) (macc&3)
+#define A6B(adrm) ((adrm&15)<<2)
+#define A6C(isc)  ((isc&63)<<9)
+#define A6D(bcc)  (((bcc-2)&7)<<6)
+#define A6502T(macc, adrm, bcc, isc) .dw A6A(macc)|A6B(adrm)|A6C(isc)|A6D(bcc)
 
 
+ISC_SRE .equ 0
+ISC_SLO .equ 1
+ISC_TAS .equ 2
+ISC_SHY .equ 3
+ISC_SHX .equ 4
+ISC_SHA .equ 5
+ISC_SBX .equ 6
+ISC_SAX .equ 7
+ISC_RRA .equ 8
+ISC_RLA .equ 9
+ISC_LXA .equ 10
+ISC_LAX .equ 11
+ISC_LAS .equ 12
+ISC_ISC .equ 13
+ISC_DCP .equ 14
+ISC_ARR .equ 15
+ISC_ANE .equ 16
+ISC_ANC .equ 17
+ISC_ALR .equ 18
+ISC_BIT .equ 19
+ISC_CPY .equ 20
+ISC_CPX .equ 21
+ISC_CMP .equ 22
+ISC_ROR .equ 23
+ISC_ROL .equ 24
+ISC_LSR .equ 25
+ISC_ASL .equ 26
+ISC_ORA .equ 27
+ISC_EOR .equ 28
+ISC_AND .equ 29
+ISC_SBC .equ 30
+ISC_ADC .equ 31
+ISC_INC .equ 32
+ISC_DEC .equ 33
+ISC_STY .equ 34
+ISC_STX .equ 35
+ISC_STA .equ 36
+ISC_LDY .equ 37
+ISC_LDX .equ 38
+ISC_LDA .equ 39
 
-
-
-
-
-
-
-
+ISC_TAX .equ 40
+ISC_TAY .equ 41
+ISC_TSX .equ 42
+ISC_TXA .equ 43
+ISC_TXS .equ 44
+ISC_TYA .equ 45
+ISC_PHA .equ 46
+ISC_PHP .equ 47
+ISC_PLA .equ 48
+ISC_PLP .equ 49
+ISC_DEX .equ 50
+ISC_DEY .equ 51
+ISC_INX .equ 52
+ISC_INY .equ 53
+ISC_ASLA .equ 54
+ISC_LSRA .equ 55
+ISC_ROLA .equ 56
+ISC_RORA .equ 57
+ISC_CLC .equ 58
+ISC_CLD .equ 59
+ISC_CLI .equ 60
+ISC_CLV .equ 61
+ISC_SEC .equ 62
+ISC_SED .equ 63
+ISC_SEI .equ 64
+ISC_BCC .equ 65
+ISC_BCS .equ 66
+ISC_BEQ .equ 67
+ISC_BMI .equ 68
+ISC_BNE .equ 69
+ISC_BPL .equ 70
+ISC_BVC .equ 71
+ISC_BVS .equ 72
+ISC_BRK .equ 73
+ISC_RTI .equ 74
+ISC_RTS .equ 75
+ISC_NOP .equ 76
+ISC_JAMX .equ 77
+ISC_JSR .equ 78
+ISC_JMPA .equ 79
+ISC_JMPI .equ 80
+ISC_JAM .equ 81
+;ISC_ .equ 
 
 #endif
 .list

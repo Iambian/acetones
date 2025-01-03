@@ -42,7 +42,7 @@ programStart:
     ld  hl,mpKeyMode
     ld  (hl),3      
     ld  (save_spl),sp
-    ld  sp,main_ram     ;save values backwards into saferam1. barely using it.
+    ;ld  sp,main_ram     ;save values backwards into saferam1. barely using it.
     ld  a,MB
     ld  (save_mbase),a
     ld  a,$D0
