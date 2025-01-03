@@ -19,7 +19,20 @@ a6502_init:
     exx
 
     call a6502_flagsToNativeLUTGen
-
+;------------------------------
+;Runs instruction at REGPC while
+;reloading E,HL
+a6502_reload_then_getInstruction:
+    ld.s bc,(ix+REGPC)
+    ld  e,c
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    ld  hl,(hl)
+    ld  b,0
+    ld  c,e
+    add hl,bc
+    jr  a6502_getInstruction
 ;------------------------------
 a6502_getInstruction_exx:
     exx
@@ -61,6 +74,7 @@ a6502_getInstruction:
     jr  z,a6502_nextargfetch_pagecross
 a6502_nextargfetch_continue:
     exx
+    lea hl,iy+0
 a6502_int_timer         .equ $+1
     ld  bc,-27939
     add hl,bc
@@ -71,6 +85,8 @@ a6502_int_cancel_take:
     ld  sp,CALLTABLE
     add hl,sp
     ld  sp,hl
+    pop bc
+    add iy,bc   ;advance instruction timer
     exx
     ret
 
@@ -973,31 +989,160 @@ _:  xor a,0
 ; * The generalisation is either inefficient, or would make a giant mess to
 ;   try to clean up.
 ;       (e.g.) basically all branch and branch-adjacent instructions
-a6502_inst_tax:
-a6502_inst_tay:
-a6502_inst_tsx:
-a6502_inst_txa:
-a6502_inst_txs: ;flags not affected
-a6502_inst_tya:
+a6502_inst_tax: ;NZ 1b 2cc A->X
+    ld  b,(ix+REGA)
+    ld  (ix+REGX),b
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+a6502_inst_tay: ;NZ 1b 2cc A->Y
+    ld  b,(ix+REGA)
+    ld  (ix+REGY),b
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+a6502_inst_tsx: ;NZ 1b 2cc S->X
+    ld  b,(ix+REGSP)
+    ld  (ix+REGX),b
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+a6502_inst_txa: ;NZ 1b 2cc X->A
+    ld  b,(ix+REGX)
+    ld  (ix+REGA),b
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
+a6502_inst_txs: ;-- 1b 2cc X->S
+    ld  b,(ix+REGX)
+    ld  (ix+REGSP),b
+    ret
+a6502_inst_tya: ;NZ 1b 2cc X->A
+    ld  b,(ix+REGY)
+    ld  (ix+REGA),b
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
 a6502_inst_pha: ;flags not affected
+    ld  a,(ix+REGA)
+    ld  bc,STACKBASE
+    ld  c,(ix+REGSP)
+    ld  (bc),a
+    dec c
+    ld  (ix+REGSP),c
+    ret
 a6502_inst_php: ;you must construct flags to push to stack
+    ld  a,(ix+REGSR)
+    or  a,%00110000
+    ld  bc,STACKBASE
+    ld  c,(ix+REGSP)
+    ld  (bc),a
+    dec c
+    ld  (ix+REGSP),c
+    .error "YOU MUST FIX THIS."
+    ret
 a6502_inst_pla:
+    ld  bc,STACKBASE
+    ld  c,(ix+REGSP)
+    inc c
+    ld  a,(bc)
+    ld  (ix+REGSP),c
+    ld  (ix+REGA),a
+    ld  b,a
+    ex  af,af'
+    inc b
+    dec b
+    ex  af,af'
+    ret
 a6502_inst_plp: ;you must deconstruct flags back to native order
+    ld  bc,STACKBASE
+    ld  c,(ix+REGSP)
+    inc c
+    ld  a,(bc)
+    ld  (ix+REGSP),c
+    ld  b,(ix+REGSR)
+    xor a,b
+    and a,%11001111
+    xor a,b
+    ld  (ix+REGSR),a
+    .error "YOU MUST FIX THIS."
+    ret
 a6502_inst_dex:
+    ex  af,af'
+    dec (ix+REGX)
+    ex  af,af'
+    ret
 a6502_inst_dey:
+    ex  af,af'
+    dec (ix+REGY)
+    ex  af,af'
+    ret
 a6502_inst_inx:
+    ex  af,af'
+    inc (ix+REGX)
+    ex  af,af'
+    ret
 a6502_inst_iny:
+    ex  af,af'
+    inc (ix+REGY)
+    ex  af,af'
+    ret
 a6502_inst_asl: ;it has other memory modes, but this one operates on reg A too.
+    ex  af,af'
+    sla (ix+REGA)
+    ex  af,af'
+    ret
 a6502_inst_lsr: ;it has other memory modes, but this one operates on reg A too.
+    ex  af,af'
+    srl (ix+REGA)
+    ex  af,af'
+    ret
 a6502_inst_rol: ;it has other memory modes, but this one operates on reg A too.
+    ex  af,af'
+    rl  (ix+REGA)
+    ex  af,af'
+    ret
 a6502_inst_ror: ;it has other memory modes, but this one operates on reg A too.
+    ex  af,af'
+    rr  (ix+REGA)
+    ex  af,af'
+    ret
 a6502_inst_clc:
+    ex  af,af'
+    scf
+    ccf
+    ex  af,af'
+    ret
 a6502_inst_cld:
+    res SF_DEC,(ix+REGSR)
+    ret
 a6502_inst_cli:
+    res SF_INT,(ix+REGSR)
+    ret
 a6502_inst_clv:
+    res SF_OVER,(ix+REGSR)
+    ret
 a6502_inst_sec:
+    ex  af,af'
+    scf
+    ex  af,af'
+    ret
 a6502_inst_sed:
+    set SF_DEC,(ix+REGSR)
+    ret
 a6502_inst_sei:
+    set SF_INT,(ix+REGSR)
+    ret
 a6502_inst_bcc:
 a6502_inst_bcs:
 a6502_inst_beq:
@@ -1024,7 +1169,7 @@ a6502_inst_nop: ;$EA. There are many other NOPs with their own timings and modes
 ; # ## ## ### ## # # ##    #  #    ##  #  ##  ### ##     ## # ##   #  # # #  ##                                       
 ;-------------------------------------------------------------------------------
 ;Unofficial instructions. Surprisingly many of them are usable. A few are
-;unstable. A few more will lokk up the CPU, making their use for alternate
+;unstable. A few more will lock up the CPU, making their use for alternate
 ;emulator-specific purposes an appealing idea. HINT HINT NUDGE NUDGE.
 ;
 a6502_inst_alr:     ;imm, opc $4B
@@ -1121,6 +1266,7 @@ a6502_inst_shx:     ;9E
 a6502_inst_shy:     ;9C
 a6502_inst_tas:     ;9B
 a6502_inst_usbc:    ;EB Map this to instruction $E9 (inst6502_sbc_imm)
+a6502_inst_lxa:
     ret
 
 
@@ -1389,86 +1535,105 @@ A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_INC)    ;FE
 A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ISC)    ;FF
 
 a6502_norm_func_table:
-.dl         ;ISC_SRE .equ 0
-.dl
-.dl         ;ISC_SLO .equ 1
-.dl
-.dl         ;ISC_TAS .equ 2
-.dl
-.dl         ;ISC_SHY .equ 3
-.dl
-.dl         ;ISC_SHX .equ 4
-.dl
-.dl         ;ISC_SHA .equ 5
-.dl
-.dl         ;ISC_SBX .equ 6
-.dl
-.dl         ;ISC_SAX .equ 7
-.dl
-.dl         ;ISC_RRA .equ 8
-.dl
-.dl         ;ISC_RLA .equ 9
-.dl
-.dl         ;ISC_LXA .equ 10
-.dl
-.dl         ;ISC_LAX .equ 11
-.dl
-.dl         ;ISC_LAS .equ 12
-.dl
-.dl         ;ISC_ISC .equ 13
-.dl
-.dl         ;ISC_DCP .equ 14
-.dl
-.dl         ;ISC_ARR .equ 15
-.dl
-.dl         ;ISC_ANE .equ 16
-.dl
-.dl         ;ISC_ANC .equ 17
-.dl
-.dl         ;ISC_ALR .equ 18
-.dl
-.dl         ;ISC_BIT .equ 19
-.dl
-.dl         ;ISC_CPY .equ 20
-.dl
-.dl         ;ISC_CPX .equ 21
-.dl
-.dl         ;ISC_CMP .equ 22
-.dl
-.dl         ;ISC_ROR .equ 23
-.dl
-.dl         ;ISC_ROL .equ 24
-.dl
-.dl         ;ISC_LSR .equ 25
-.dl
-.dl         ;ISC_ASL .equ 26
-.dl
-.dl         ;ISC_ORA .equ 27
-.dl
-.dl         ;ISC_EOR .equ 28
-.dl
-.dl         ;ISC_AND .equ 29
-.dl
-.dl         ;ISC_SBC .equ 30
-.dl
-.dl         ;ISC_ADC .equ 31
-.dl
-.dl         ;ISC_INC .equ 32
-.dl
-.dl         ;ISC_DEC .equ 33
-.dl
-.dl         ;ISC_STY .equ 34
-.dl
-.dl         ;ISC_STX .equ 35
-.dl
-.dl         ;ISC_STA .equ 36
-.dl
-.dl         ;ISC_LDY .equ 37
-.dl
-.dl         ;ISC_LDX .equ 38
-.dl
-.dl         ;ISC_LDA .equ 39
-.dl
+.dl a6502_inst_tas    ,a6502_inst_tas       ;ISC_TAS .equ 0
+.dl a6502_inst_shy    ,a6502_inst_shy       ;ISC_SHY .equ 1
+.dl a6502_inst_shx    ,a6502_inst_shx       ;ISC_SHX .equ 2
+.dl a6502_inst_sha    ,a6502_inst_sha       ;ISC_SHA .equ 3
+.dl a6502_inst_sbx    ,a6502_inst_sbx       ;ISC_SBX .equ 4
+.dl a6502_inst_sax_bc ,a6502_inst_sax_hl    ;ISC_SAX .equ 5
+.dl a6502_inst_lxa    ,a6502_inst_lxa       ;ISC_LXA .equ 6
+.dl a6502_inst_lax_bc ,a6502_inst_lax_hl    ;ISC_LAX .equ 7
+.dl a6502_inst_las    ,a6502_inst_las       ;ISC_LAS .equ 8
+.dl a6502_inst_arr    ,a6502_inst_arr       ;ISC_ARR .equ 9
+.dl a6502_inst_ane    ,a6502_inst_ane       ;ISC_ANE .equ 10
+.dl a6502_inst_anc    ,a6502_inst_anc       ;ISC_ANC .equ 11
+.dl a6502_inst_alr    ,a6502_inst_alr       ;ISC_ALR .equ 12
+.dl a6502_inst_bit_bc ,a6502_inst_bit_hl    ;ISC_BIT .equ 13
+.dl a6502_inst_cpy_bc ,a6502_inst_cpy_hl    ;ISC_CPY .equ 14
+.dl a6502_inst_cpx_bc ,a6502_inst_cpx_hl    ;ISC_CPX .equ 15
+.dl a6502_inst_cmp_bc ,a6502_inst_cmp_hl   ;ISC_CMP .equ 16
+.dl a6502_inst_ror_bc ,a6502_inst_ror_hl   ;ISC_ROR .equ 17
+.dl a6502_inst_rol_bc ,a6502_inst_rol_hl   ;ISC_ROL .equ 18
+.dl a6502_inst_lsr_bc ,a6502_inst_lsr_hl   ;ISC_LSR .equ 19
+.dl a6502_inst_asl_bc ,a6502_inst_asl_hl   ;ISC_ASL .equ 20
+.dl a6502_inst_or_bc  ,a6502_inst_or_hl    ;ISC_ORA .equ 21
+.dl a6502_inst_eor_bc ,a6502_inst_eor_hl   ;ISC_EOR .equ 22
+.dl a6502_inst_and_bc ,a6502_inst_and_hl   ;ISC_AND .equ 23
+.dl a6502_inst_sbc_bc ,a6502_inst_sbc_hl   ;ISC_SBC .equ 24
+.dl a6502_inst_adc_bc ,a6502_inst_adc_hl   ;ISC_ADC .equ 25
+.dl a6502_inst_inc_bc ,a6502_inst_inc_hl   ;ISC_INC .equ 26
+.dl a6502_inst_dec_bc ,a6502_inst_dec_hl   ;ISC_DEC .equ 27
+.dl a6502_inst_sty_bc ,a6502_inst_sty_hl   ;ISC_STY .equ 28
+.dl a6502_inst_stx_bc ,a6502_inst_stx_hl   ;ISC_STX .equ 29
+.dl a6502_inst_sta_bc ,a6502_inst_sta_hl   ;ISC_STA .equ 30
+.dl a6502_inst_ldy ,a6502_inst_ldy         ;ISC_LDY .equ 31
+.dl a6502_inst_ldx ,a6502_inst_ldx         ;ISC_LDX .equ 32
+.dl a6502_inst_lda ,a6502_inst_lda         ;ISC_LDA .equ 33
+
+a6502_special_moded_func_table:
+.dl a6502_inst_sre_bc,a6502_inst_sre_hl_seg1,a6502_inst_sre_hl_seg2 ;ISC_SRE .equ 76
+.dl a6502_inst_slo_bc,a6502_inst_slo_hl_seg1,a6502_inst_slo_hl_seg2 ;ISC_SLO .equ 77
+.dl a6502_inst_rra_bc,a6502_inst_rra_hl_seg1,a6502_inst_rra_hl_seg2 ;ISC_RRA .equ 78
+.dl a6502_inst_rla_bc,a6502_inst_rla_hl_seg1,a6502_inst_rla_hl_seg2 ;ISC_RLA .equ 79
+.dl a6502_inst_isc_bc,a6502_inst_isc_hl_seg1,a6502_inst_isc_hl_seg2 ;ISC_ISC .equ 80
+.dl a6502_inst_dcp_bc,a6502_inst_dcp_hl_seg1,a6502_inst_dcp_hl_seg2 ;ISC_DCP .equ 81
+
+
+
+;Note: Register timings are always in the main table. You should be using that
+;to retrieve instruction timings. DO NOT INCLUDE THAT INFORMATION HERE.
+
+a6502_special_specific_case_func_table:
+.db 2 \.dl a6502_inst_tax, a6502_getInstruction ;ISC_TAX   .equ 34
+.db 2 \.dl a6502_inst_tay, a6502_getInstruction ;ISC_TAY  .equ 35
+.db 2 \.dl a6502_inst_tsx, a6502_getInstruction ;ISC_TSX  .equ 36
+.db 2 \.dl a6502_inst_txa, a6502_getInstruction ;ISC_TXA  .equ 37
+.db 2 \.dl a6502_inst_txs, a6502_getInstruction ;ISC_TXS  .equ 38
+.db 2 \.dl a6502_inst_tya, a6502_getInstruction ;ISC_TYA  .equ 39
+.db 2 \.dl a6502_inst_pha, a6502_getInstruction ;ISC_PHA  .equ 40
+.db 2 \.dl               ;ISC_PHP  .equ 41
+.db 2 \.dl a6502_inst_pla, a6502_getInstruction ;ISC_PLA  .equ 42
+.db 2 \.dl               ;ISC_PLP  .equ 43
+.db 2 \.dl a6502_inst_dex, a6502_getInstruction ;ISC_DEX  .equ 44
+.db 2 \.dl a6502_inst_dey, a6502_getInstruction ;ISC_DEY  .equ 45
+.db 2 \.dl a6502_inst_inx, a6502_getInstruction ;ISC_INX  .equ 46
+.db 2 \.dl a6502_inst_iny, a6502_getInstruction ;ISC_INY  .equ 47
+.db 2 \.dl a6502_inst_asl, a6502_getInstruction ;ISC_ASLA .equ 48
+.db 2 \.dl a6502_inst_lsr, a6502_getInstruction ;ISC_LSRA  .equ 49
+.db 2 \.dl a6502_inst_rol, a6502_getInstruction ;ISC_ROLA  .equ 50
+.db 2 \.dl a6502_inst_ror, a6502_getInstruction ;ISC_RORA  .equ 51
+.db 2 \.dl a6502_inst_clc, a6502_getInstruction ;ISC_CLC   .equ 52
+.db 2 \.dl a6502_inst_cld, a6502_getInstruction ;ISC_CLD  .equ 53
+.db 2 \.dl a6502_inst_cli, a6502_getInstruction ;ISC_CLI  .equ 54
+.db 2 \.dl a6502_inst_clv, a6502_getInstruction ;ISC_CLV  .equ 55
+.db 2 \.dl a6502_inst_sec, a6502_getInstruction ;ISC_SEC  .equ 56
+.db 2 \.dl a6502_inst_sed, a6502_getInstruction ;ISC_SED  .equ 57
+.db 2 \.dl a6502_inst_sei, a6502_getInstruction ;ISC_SEI  .equ 58
+.db  \.dl               ;ISC_BCC  .equ 59
+.db  \.dl               ;ISC_BCS  .equ 60
+.db  \.dl               ;ISC_BEQ  .equ 61
+.db  \.dl               ;ISC_BMI  .equ 62
+.db  \.dl               ;ISC_BNE  .equ 63
+.db  \.dl               ;ISC_BPL  .equ 64
+.db  \.dl               ;ISC_BVC  .equ 65
+.db  \.dl               ;ISC_BVS  .equ 66
+.db  \.dl               ;ISC_BRK  .equ 67
+.db  \.dl               ;ISC_RTI  .equ 68
+.db  \.dl               ;ISC_RTS  .equ 69
+.db  \.dl               ;ISC_NOP  .equ 70
+.db  \.dl               ;ISC_JAMX .equ 71
+.db  \.dl               ;ISC_JSR   .equ 72
+.db  \.dl               ;ISC_JMPA .equ 73
+.db  \.dl               ;ISC_JMPI  .equ 74
+.db  \.dl               ;ISC_JAM   .equ 75
+
+
+
+
+
+
+
+
 
 
 
