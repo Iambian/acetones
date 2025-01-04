@@ -2834,18 +2834,16 @@ inst6502_brk_from_handler:
     ;instead of jumping over the BRK instruction, this hops backwards to
     ;undo the partial fetch that the interrupt occurred on.
     ADDCYC(7)
-    ld  hl,STACKBASE
-    ld  L,(ix+REGSP)
     ld.s de,(ix+REGPC)
     dec de
     jr  +_
 inst6502_brk:
     ADDCYC(7)
-    ld  hl,STACKBASE
-    ld  L,(ix+REGSP)
     ld.s de,(ix+REGPC)
     inc de      ;that extra spacer.
-_:  ld  (hl),d
+_:  ld  hl,STACKBASE
+    ld  L,(ix+REGSP)
+    ld  (hl),d
     dec L
     ld  (hl),e
     dec L
@@ -2951,14 +2949,14 @@ inst6502_jmp_abs_inf_loop:
 
 
 
+;Doing much the same as abs_split_start below, except with fewer things
+;because we don't need to preserve any of the other stuff.
 ;Note: In earlier 6502 implementations, cross-page reads on indirect is bugged.
 ;   The end effect would be that inst6502_jmp_indir_splitread would wrap around
 ;   to the start of the current page rather than try to read the next page.
 ;indirect	JMP (oper)	6C	3	5  
 inst6502_jmp_indir:
     ADDCYC(5)
-    ;Doing much the same as abs_split_start below, except with fewer things
-    ;because we don't need to preserve any of the other stuff.
     ld  c,(hl)
     inc hl
     inc e

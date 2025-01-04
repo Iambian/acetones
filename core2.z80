@@ -18,7 +18,8 @@ a6502_init:
     exx
     exx
 
-    call a6502_flagsToNativeLUTGen
+    call a6502_flags6502ToNativeLUTGen
+    call a6502_flagsz80to6502
 ;------------------------------
 ;Runs instruction at REGPC while
 ;reloading E,HL
@@ -103,12 +104,16 @@ a6502_int_take:
 
 ;##############################################################################
 
-;Call this during init.
+;Call this during init. This table is used in the BIT instruction which sets
+;NVZ without bothering to consult the status register. As such, we won't.
+;Only the carry is the odd one out, but we're converting the whole mass
+;to native anyway.
+;This table can also be used during the PLP and RTI instructions to move some
+;registers back into native.
 ;Src: [12-- --34]  => [13-- -2-4]
-a6502_flagsToNativeLUTGen:
+a6502_flags6502ToNativeLUTGen:
     ld  hl,flags6502toNativeLUT
-_:  ld  c,l     ;keep original copy in C, for final step
-    ld  a,l
+_:  ld  a,L
     rlca
     rlca
     rlca
@@ -118,15 +123,32 @@ _:  ld  c,l     ;keep original copy in C, for final step
     xor a,b
     and a,%11111011 ;Eh. Just trust me on this one. we have src 2 and 3 in place
     xor a,b
-    xor a,c
+    xor a,L
     and a,%01111110 ;src 1 and 4 hasn't moved, so put them in place.
-    xor a,c
+    xor a,L
     ld  (hl),a      ;z80 maskout value %00111010 with LUT not-A operand on xor.
-    inc l
+    inc L
+    jr  nz,-_
+    ret
+;Z80: [12-- ---3] -> 6502: [1--- --23]
+;Usage: retrieve Z80 flags via pushaf\popbc sequence, then use this LUT
+;to get mask-in values for 6502 CZN. This is to be used as part of PHP and BRK.
+;Use this AND mask to merge in external 6502 flags if LUTRES:A, EXTF:B
+;AND A,%10000011
+a6502_flagsz80to6502:   ;Converts CZN to be masked in later
+    ld  hl,flagsZ80to6502LUT
+_:  ld  a,L
+    rlca
+    rlca
+    rlca    ;Only bit 7 needs to be moved to the bit 1 position.
+    xor a,L ;All the other bits can stay where they are.
+    and a,%00000010
+    xor a,L
+    ld  (hl),a
+    inc L
     jr  nz,-_
     ret
 
-    
     
 
 
@@ -1041,15 +1063,25 @@ a6502_inst_pha: ;flags not affected
     dec c
     ld  (ix+REGSP),c
     ret
-a6502_inst_php: ;you must construct flags to push to stack
-    ld  a,(ix+REGSR)
+a6502_inst_php: ;Verify that the flags pushed are accurate.
+    ex  af,af'
+    push.s af
+    pop.s bc
+    ex  af,af'
+    ld  a,c
+    ld  bc,flagsZ80to6502LUT
+    ld  c,a
+    ld  a,(bc)
+    ld  c,(ix+REGSR)
+    xor a,c
+    and a,%10000011
+    xor a,c
     or  a,%00110000
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
     ld  (bc),a
     dec c
     ld  (ix+REGSP),c
-    .error "YOU MUST FIX THIS."
     ret
 a6502_inst_pla:
     ld  bc,STACKBASE
@@ -1064,7 +1096,7 @@ a6502_inst_pla:
     dec b
     ex  af,af'
     ret
-a6502_inst_plp: ;you must deconstruct flags back to native order
+a6502_inst_plp:     ;Verify that flag reconstruct to native is valid.
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
     inc c
@@ -1075,7 +1107,14 @@ a6502_inst_plp: ;you must deconstruct flags back to native order
     and a,%11001111
     xor a,b
     ld  (ix+REGSR),a
-    .error "YOU MUST FIX THIS."
+    ld  bc,flags6502toNativeLUT
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    ex  af,af'
+    push.s bc
+    pop.s af
+    ex  af,af'
     ret
 a6502_inst_dex:
     ex  af,af'
@@ -1143,23 +1182,264 @@ a6502_inst_sed:
 a6502_inst_sei:
     set SF_INT,(ix+REGSR)
     ret
+;----------------------------
+;Note: ALL BRANCH INSTRUCTIONS HAVE THEIR RET ADDRESS RETURN TO CONSUME THE
+;       OFFSET BYTE [a6502_newfetch]. IF THE JUMP IS TAKEN, THIS IS OVERRIDDEN
+;       SO THE RETURN WILL INSTEAD BE A JUMP TO [a6502_getInstruction]
+a6502_isub_branch:
+;Add waitloop detection by copying the routine but adding to it. Copy it to the
+;bottom of the branch routine block to prevent any of the JRs being used there
+;from going out of range.
+a6502_isub_branch_detect_waitloop:
+    ex  af,af'
+a6502_isub_branch_no_ex:
+    ADDCYC(1)
+    ld  a,(hl)
+    ld  L,a
+    add a,a     ;detect if it should be sign-extended
+    sbc a,a
+    ld  H,a     ;sign-extending offset
+    ld  d,(ix+REGPC+1)
+    inc de      ;Offset starts from the beginning of the next instruction.
+    add.s hl,de ;Calculate new position in HL
+    ld  (ix+REGPC+1),h  ;New MSB is tucked away. Won't need to update LSB.
+    ld  a,d
+    cp  a,h
+    jr  z,+_    ;Jump if no pagechange
+    ADDCYC(1)
+_:  ;Either way, recalculate HL since we lost that calculating new 6502:PC
+    ex  de,hl   ;New position now in DE
+    ld  b,d
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  b,0
+    ld  c,e
+    add hl,bc   ;New address to begin fetching with.
+    jp  a6502_getInstruction
+;----------------------------
 a6502_inst_bcc:
+    ex  af,af'
+    jr  nc,a6502_isub_branch
+    ex  af,af'
+    ret
 a6502_inst_bcs:
+    ex  af,af'
+    jr  c,a6502_isub_branch
+    ex  af,af'
+    ret
 a6502_inst_beq:
+    ex  af,af'
+    jr  z,a6502_isub_branch_detect_waitloop
+    ex  af,af'
+    ret
 a6502_inst_bmi:
+    ex  af,af'
+    jp  m,a6502_isub_branch
+    ex  af,af'
+    ret
 a6502_inst_bne:
+    ex  af,af'
+    jr  nz,a6502_isub_branch
+    ex  af,af'
+    ret
 a6502_inst_bpl:
+    ex  af,af'
+    jr  nz,a6502_isub_branch
+    ex  af,af'
+    ret
 a6502_inst_bvc:
+    bit SF_OVER,(ix+REGSR)
+    ret nz
+    jr  a6502_isub_branch_no_ex
 a6502_inst_bvs:
+    bit SF_OVER,(ix+REGSR)
+    ret z
+    jr  a6502_isub_branch_no_ex
+
+a6502_inst_brk_from_handler:
+    ADDCYC(7)
+    ld.s de,(ix+REGPC)
+    dec de
+    jr  +_
+
+;return to full HL:E reload
 a6502_inst_brk:
-a6502_inst_rti:
-a6502_inst_jmp_abs:
-a6502_inst_jmp_ind:
-a6502_inst_jsr:
-a6502_inst_rts:
-a6502_inst_nop: ;$EA. There are many other NOPs with their own timings and modes
+    ld.s de,(ix+REGPC)
+    inc de      ;that extra spacer.
+_:  ld  hl,STACKBASE
+    ld  L,(ix+REGSP)
+    ld  (hl),d
+    dec L
+    ld  (hl),e
+    dec L
+    ex  af,af'
+    push.s af
+    pop.s bc
+    ex  af,af'
+    ld  a,c
+    ld  bc,flagsZ80to6502LUT
+    ld  c,a
+    ld  a,(bc)
+    ld  c,(ix+REGSR)
+    xor a,c
+    and a,%10000011
+    xor a,c
+    set SF_INT,a
+    ld  (hl),a
+    dec L
+    ld  (ix+REGSP),L
+    WAS_NMI_TRIGGERED
+    ld  bc,$FE  ;IRQ vector
+    jr  z,+_
+    ld  bc,$FA  ;NMI vector, if NMI is hijacking this instruction.
+_:  ld  hl,(BASETABLE_STRIDE*$FF)+PAGETABLE
+    ld  hl,(hl)
+    add hl,bc
+    ld  de,(hl)
+    ld.s (ix+REGPC),de
     ret
 
+;Return to full HL:E reload
+a6502_inst_rti:
+    ld  bc,STACKBASE
+    ld  L,(ix+REGSP)
+    inc L
+    ld  a,(hl)
+    inc L
+    ld  e,(hl)
+    inc L
+    ld  d,(hl)
+    ld  (ix+REGSP),L
+    ld.s (ix+REGSP),de
+    ld  b,(ix+REGSR)
+    xor a,b
+    and a,%11001111
+    xor a,b
+    ld  (ix+REGSR),a
+    ld  bc,flags6502toNativeLUT
+    ld  c,a
+    ld  a,(bc)
+    ld  c,a
+    ex  af,af'
+    push.s bc
+    pop.s af
+    ex  af,af'
+    ret
+
+;Return to full HL:E reload
+a6502_inst_jmp_abs:
+    ld  d,(ix+REGPC+1)
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    inc d
+    ld  c,d
+    ld  b,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+_:  ld  h,(hl)
+    ld  L,a     ;HL= new address
+    dec de
+    dec de
+    ex.s de,hl
+    or  a,a
+    sbc hl,de
+    ld.s (ix+REGPC),de
+    ret nz
+a6502_inf_loop_detected:
+    ld  bc,(a6502_int_timer)
+    or  a,a
+    sbc hl,hl
+    sbc hl,bc   ;negate expected interrupt result to a positive number
+    ld  (ix+TEMP_MEMORY),hl ;Accurate timing be damned. I just want the next
+    ld  iy,(ix+TEMP_MEMORY) ;interrupt-like event to trigger.
+    ret
+
+;return to full HL:E reload
+a6502_inst_jmp_ind:
+    ld  bc,PAGETABLE
+    ld  a,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    ld  h,(ix+REGPC+1)
+    inc h
+    ld  L,BASETABLE_STRIDE
+    mlt hl
+    add hl,bc
+    ld  hl,(hl)
+_:  ld  h,(hl)  ;high byte destination address
+    ld  L,a     ;low byte destination address
+    inc L       ;Check if there will be a split read.
+    ld  h,BASETABLE_STRIDE
+    mlt hl
+    jr  z,+_        ;jump if split read.
+    add hl,bc       ;add high byte offset into pagetable
+    ld  bc,(hl)     ;address of page start
+    sbc hl,hl
+    ld  L,a         ;set offset into page start
+    add hl,bc       ;complete offset
+    ld  de,(hl)     ;read address at that location
+    ld.s (ix+REGPC),de  ;and store it, returning to full reload.
+    ret
+_:  add hl,bc       ;add high byte offset into pagetable
+    ld  hl,(hl)     ;address of page start
+    ld  d,(hl)      ;high byte at start of page
+    ld  bc,255
+    add hl,bc
+    ld  e,(hl)      ;low byte at end of page
+    ld.s (ix+REGPC),de
+    ret
+
+;Full HL:E reload
+a6502_inst_jsr:
+    ld  d,(ix+REGPC+1)
+    ld  c,(hl)
+    inc hl
+    inc e
+    jr  nz,+_
+    inc d
+    ld  a,d
+    ld  e,BASETABLE_STRIDE
+    mlt de
+    ld  hl,PAGETABLE
+    add hl,de
+    ld  hl,(hl)
+    ld  d,a
+    ld  e,0
+_:  ld  b,(hl)
+    ld  hl,STACKBASE
+    ld  L,(ix+REGSP)
+    ld  (hl),d
+    dec L
+    ld  (hl),e
+    dec L
+    ld  (ix+REGSP),l
+    ld.s (ix+REGSP),bc
+    ret
+
+;Full HL:E reload
+a6502_inst_rts:
+    ld  hl,STACKBASE
+    ld  L,(ix+REGSP)
+    inc L
+    ld  e,(hl)
+    inc L
+    ld  d,(hl)
+    ld  (ix+REGSP),L
+    inc de
+    ld.s (ix+REGPC),de
+    ret
+
+;Official NOP. Reload to immediately load the next instruction.
+;This can be skipped.
+a6502_inst_nop:
+    ret
 
 
 ;-------------------------------------------------------------------------------

@@ -122,6 +122,7 @@ TABLESEND           .equ INT_TABLE+(INT_TABLE_MAXLEN*INT_TABLE_STRIDE)
 ; Trailing edge of saferam1 allocations. LUTs and the like.
 ;
 flags6502toNativeLUT    .equ    saferam1+1024-256
+flagsZ80to6502LUT       .equ    flags6502toNativeLUT-256
 
 
 
