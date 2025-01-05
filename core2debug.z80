@@ -1,0 +1,49 @@
+; Only #include this file if AUTONESTEST is not zero.
+; Upon test failure, return screen to regular mode
+; and print debugging information.
+
+; Only two things are called here. One to init, and one to advance the
+; nestest checker that's called from core.
+
+
+
+a6502_nestest_init:
+    ld  hl,a6502_nestest_timings_file
+    call _Mov9ToOP1
+    call _ChkFindSym
+    jr  c,$     ;did you really start a test with no test file?
+    call _ChkInRam
+    ex  de,hl
+    ld  de,9    ;clears DEU in case.
+    jr  z,+_
+    add hl,de
+    ld  e,(hl)
+    add hl,de
+    inc hl
+_:  ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ;HL= start of tester file
+    ret
+
+
+
+
+
+;Retrieve data from CPU core, then check against NESTEST log file.
+;We assume entry point is "normal registers". Thus, most of our input
+;will be in the shadow registers.
+;Input: E':LOWPAGE, HL':Current instruction byte. 
+;       IY=Clock count prior to executing current instruction
+a6502_nestest_verify:
+    ret
+
+
+
+a6502_nestest_timings_file:
+.db AppVarObj,"timings",0
+
+
+
+

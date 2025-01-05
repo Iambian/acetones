@@ -137,7 +137,15 @@ a6502_newfetch:
     jr  z,a6502_newfetch_pagecross
 a6502_newfetch_continue:
 a6502_getInstruction:
-    ;Fetch instruction, then advance PC 
+    #if AUTONESTEST > 0
+        ld  (ix+REGPC+0),e
+        exx
+        ld  hl,(ix+CORE_STACK_BASE)
+        ld  sp,hl
+        call a6502_nestest_verify
+        exx
+    #endif
+    ;Fetch instruction, then advance PC
     ld  a,(hl)
     inc hl
     inc e

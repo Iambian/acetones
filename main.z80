@@ -1218,8 +1218,8 @@ vatTraverse_loop:
     ld  d,(ix-4)
     call _ChkInRam
     ex  de,hl
-    jr  nc,+_
     ld  de,9
+    jr  z,+_
     add hl,de
     ld  e,(hl)
     add hl,de
