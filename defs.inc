@@ -6,6 +6,11 @@
 ;
 ;
 
+;Rebuild with this set to 1 in order to perform a headless test,
+;printing either a success message, or a list of instructions leading
+;up to failure againt a logfile of a predetermined name.
+#define AUTONESTEST 0
+
 ;Undefine this to speed up core process by losing debug state
 ;#define COREDEBUG
 

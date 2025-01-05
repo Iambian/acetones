@@ -17,21 +17,68 @@ a6502_rwaccess_indtable .equ write_access_ptr
 
 a6502_module_start:
 a6502_init:
-    ;stuff
-    ;stuff
-    ;stuff
+    ;It'll be at this part of the initialization where you'll be afforded the
+    ;opportunity to paint certain routines red. Everyone knows red ones go
+    ;faster, but our bucket of red paint is so very limited. Only about 1000
+    ;drops worth, and over half of it is dedicated to the PPU.
+    ;If you use too much red paint, some of it will spill out onto the console.
+    ;It'll be a very angry red. Avoid it by painting slowly and checking often.
 
-    ;Setup normal registers
-    ld  iy,8
-    ;Setup shadow registers
-    exx
-    exx
+    ;THE PAINTBRUSH GOES HERE. That's done with:
+    ;       copy_autoalloc(oldtarget, newtarget, segmentsize)
+    ;The bucket of paint is managed with:
+    ;       autoreloc() and endautoreloc()
+    ;The paint bucket's emptiness is reported at the end of main.z80 with:
+    ;       reportautoreloc()
 
+    ;Map in 2KB main RAM
+    ld  hl,main_ram
+    ld  bc,$002008
+    ld  e,$00
+    call a6502_map_pages
+    ;Map in PPU memory
+    ;NOTE: In-page mirroring happens at R/W access.
+    ld  hl,core_memory_ix+PPU_CTRL
+    ld  bc,$002001
+    ld  e,$20
+    call a6502_map_pages
+    ;Load various lookup tables
     call a6502_flags6502ToNativeLUTGen
     call a6502_flagsz80to6502
+    call a6502_build_calltable
+    ;Initialize core memory
+    ld  ix,core_memory_ix
+    lea hl,ix+0
+    lea de,ix+1
+    ld  bc,126
+    ld  (hl),b
+    ldir
+    or  a,a
+    ;Preserve SP for exit vector
+    sbc hl,hl
+    add hl,sp
+    ld  (ix+CORE_STACK_BASE),hl
+    ;Initialize register state as if RESET had been triggered.
+    ld  iy,8
+    ld  (ix+REGSP),$FD
+    ld  (ix+REGSR),$24
+    ld  hl,(PAGETABLE+(255*BASETABLE_STRIDE))
+    ld  de,$0000FC  ;Offset to RESET vector ($FE=IRQ, $FA=NMI)
+    add hl,de       ;HL now points to byte at vector.
+    ld  hl,(hl)     ;Pull address from RESET vector.
+    #if AUTONESTEST > 0
+        ld  hl,$C000    ;NESTEST headless start
+    #endif
+    ld.s (ix+REGPC),hl
+    ; -- DEBUGGING -- ENABLE TIMER 0.
+    ld  hl,$F20030  \ set 0,(hl)
+    ; Core registers initialized. Jump to E:HL loading
+    jp  a6502_reload_then_getInstruction
+
+
 ;------------------------------
-;Runs instruction at REGPC while
-;reloading E,HL
+;Reloads the E:HL cache at the current PC location, then
+;begins executing instructions at that point.
 a6502_reload_then_getInstruction:
     ld.s bc,(ix+REGPC)
     ld  e,c
@@ -44,10 +91,15 @@ a6502_reload_then_getInstruction:
     add hl,bc
     jr  a6502_getInstruction
 ;------------------------------
+;Jumped to if an instruction ends with PC already on the next
+;instruction, but shadow registers are still swapped in.
+;Avoid this situation if at all possible.
 a6502_getInstruction_exx:
     exx
     jr  a6502_getInstruction
 ;------------------------------
+;Jumped to if advancing to the start of the next
+;instruction byte triggered a page crossing.
 a6502_newfetch_pagecross:
     ld  d,(ix+REGPC+1)
     inc d
@@ -59,6 +111,8 @@ a6502_newfetch_pagecross:
     ld  hl,(hl)
     jr  a6502_newfetch_continue
 ;------------------------------
+;Jumped to if advancing to the byte after the current
+;instruction byte triggered a page crossing.
 a6502_nextargfetch_pagecross:
     ld  d,(ix+REGPC+1)
     inc d
@@ -70,14 +124,20 @@ a6502_nextargfetch_pagecross:
     ld  hl,(hl)
     jr  a6502_nextargfetch_continue
 ;------------------------------
+;Advance PC by one to the start of the next instruction.
+;Call this from a routine that exits with shadow registers
+;still swapped in.
 a6502_newfetch_exx:
     exx
+;Advance PC by one to the start of the next instruction.
+;Call this if PC is at the end of the previous instruction.
 a6502_newfetch:
     inc hl
     inc e
     jr  z,a6502_newfetch_pagecross
 a6502_newfetch_continue:
 a6502_getInstruction:
+    ;Fetch instruction, then advance PC 
     ld  a,(hl)
     inc hl
     inc e
@@ -139,6 +199,7 @@ _:  ld  a,L
     inc L
     jr  nz,-_
     ret
+
 ;Z80: [12-- ---3] -> 6502: [1--- --23]
 ;Usage: retrieve Z80 flags via pushaf\popbc sequence, then use this LUT
 ;to get mask-in values for 6502 CZN. This is to be used as part of PHP and BRK.
@@ -404,7 +465,29 @@ a6502_build_calltable_collectAfter:
     jp  nz,a6502_build_calltable_mainLoop
     ret
 
-
+;HL=Base_ez80_address, C=Numpages_in_map, B=numpages_in_space, E=starting_page
+;Example: To map and mirror 2KB RAM at $D03800 inside first 8KB of 6502 space
+;HL=$D03800, C=$08, B=$20, E=$00
+;Note: B should be a power of two and evenly divisible by C.
+i6502_map_pages:
+a6502_map_pages:
+    ld  d,BASETABLE_STRIDE
+    mlt de
+    ld  ix,PAGETABLE
+    add ix,de
+    ld  a,b     ;A = main counter for total number of pages in mapping space
+    ld  de,256
+    push hl
+    pop iy
+_:  ld  b,c     ;looping for number of pages to map
+_:  ld  (ix+0),hl
+    add hl,de                   ;next page z80
+    lea ix,ix+BASETABLE_STRIDE  ;next page entry
+    dec a
+    ret z
+    djnz -_
+    lea hl,iy+0     ;start z80 pages over again for mirroring
+    jr --_
 
 ;==============================================================================
 ;

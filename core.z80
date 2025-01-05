@@ -57,9 +57,7 @@ i6502Init:
     ;TODO: Randomize 2048 bytes at main_ram to simulate power-on state.
     ;NOTE: Some games rely on this for state of randomness (e.g. FF1)
     ;Mirror 32 pages of 8 page of main_ram starting at logical page $00
-    ld  hl,main_ram
-    ld  bc,$002008
-    ld  e,$00
+
     ;Mirror 32 pages of 1 page of ppu registers starting at logical page $20
     ;NOTE: To not corrupt memory, WRITE_ACCESS at PPU registers must mask out
     ;upper 5 bits before adding offset. Offset will not exceed page bounds.
