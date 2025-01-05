@@ -95,6 +95,9 @@ chr_rom_cachefrom_B .equ chr_rom_cachefrom_A+3  ;3b. source of cache in bank 2
 timings_base        .equ chr_rom_cachefrom_B+3  ;3b. Current pointer to timings
 frameskip           .equ timings_base+3         ;1b. Max value of frameskip
 frameskip_counter   .equ frameskip+1            ;1b. Current value of frameskip
+write_access_ptr    .equ frameskip_counter+1    ;3b. Address to WRITE_ACCESS
+read_access_ptr     .equ write_access_ptr+3     ;3b. Address to READ_ACCESS
+rmw_access_ptr      .equ read_access_ptr+3      ;3b. Address to RMW_ACCESS
 
 SIZEOF_INTEGRITY_HASH    .equ 16
 MAXPRGROM_HINIB     .equ 1
@@ -104,7 +107,7 @@ MAPPER_STRIDE       .equ 9
 
 MAXNUMFILES         .equ 1                  ;set to 32 later. that's like 1.5MB
 FILETABLE_STRIDE    .equ 8
-FILETABLE           .equ frameskip_counter+1 ;(MAXNUMFILES*FILETABLE_STRIDE)b
+FILETABLE           .equ rmw_access_ptr+3 ;(MAXNUMFILES*FILETABLE_STRIDE)b
 FILE_SIZE_OFFSET    .equ 0
 FILE_ADR_OFFSET     .equ 2
 FILE_SIG_ADR_OFFSET .equ 5
@@ -351,8 +354,8 @@ OAM_VFLIP       .equ 7
 
 
 MEMACC_NO       .equ 0
-MEMACC_R        .equ 1
-MEMACC_W        .equ 2
+MEMACC_W        .equ 1
+MEMACC_R        .equ 2
 MEMACC_RW       .equ 3
 
 ADRMODE_IMM     .equ 0
@@ -373,7 +376,7 @@ ADRMODE_SPEC    .equ 13
 ;%-III|IIIB|BBAA|AAMM
 #define A6A(macc) (macc&3)
 #define A6B(adrm) ((adrm&15)<<2)
-#define A6C(isc)  ((isc&63)<<9)
+#define A6C(isc)  ((isc&127)<<9)
 #define A6D(bcc)  (((bcc-2)&7)<<6)
 #define A6502T(macc, adrm, bcc, isc) .dw A6A(macc)|A6B(adrm)|A6C(isc)|A6D(bcc)
 

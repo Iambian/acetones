@@ -1,8 +1,17 @@
-
-
+;------------------------------------------------------------------------------
+;DELETE THIS SEGMENT WHEN DONE TESTING. THIS IS A HEADER FOR 
+;A STANDALONE IMPLEMENTATION OF THIS FOR COMPILING PURPOSES
 #include "defs.inc"
 .org usermem-2
 .db $EF, $7B
+;------------------------------------------------------------------------------
+
+a6502_rwaccess_indtable .equ write_access_ptr
+;Later, put in actual test. Z if not triggered, NZ if triggered. This
+;alters the behavior of the BRK instruction.
+#define WAS_NMI_TRIGGERED bit 0,(ix+NMI_TRIGGERED)
+
+
 
 
 
@@ -149,9 +158,251 @@ _:  ld  a,L
     jr  nz,-_
     ret
 
-    
 
+;Detroys IY and IX. Be sure to reset IX to core_memory_ix. IY ought not be
+;initialized to any persistent value at this point. You're not trying to
+;rebuild the core table AFTER the core started running, are you? *glares*
+a6502_build_calltable:
+    ld  b,0
+    ld  ix,a6502_main_table
+a6502_build_calltable_mainLoop:
+    push bc
+        ld  c,BASETABLE_STRIDE
+        mlt bc
+        ld  hl,CALLTABLE
+        add hl,bc
+        push hl
+        pop iy          ;iy = start of this instruction's calltable entry
+        ;Retrieve and store clock cycle count for that instruction
+        ld  a,(ix+1)    ;CC count. let bits CBA be bits 210 of 3-bit number
+        rrca            ;bit C in bit 0 position. Move to carry
+        ld  a,(ix+0)    ;Bits BA are in bits 7 and 6 respectively
+        rla             ;C into b0, B into carry, A into 7
+        rla             ;C into b1, B into b0, A into carry
+        rla             ;C into b2, B into b1, A into b0
+        and a,3         ;remove unused bits
+        add a,2         ;add back in counts removed. Carry is cleared by now.
+        sbc hl,hl       ;clear out HL for incoming BPUSH
+        ld  L,a         ;CC count now in HL
+        ld  (iy+0),hl   ;CC count now first entry into table
+        lea iy,iy+3     ;advance
+        ;Retrieve instruction ID and branch based on which table it uses
+        ld  a,(ix+1)    ;In format %IIIIIII-
+        rrca
+        and a,%01111111 ;Have entry
+        cp  a,ISC_NONSPECIAL_LASTENTRY
+        jp  nc,a6502_build_calltable_skipNonspecialHandle
+        ;Build table as normal here.
+        ;Address mode ADRMODE_SPEC is illegal in this context.
 
+        ;BPUSH ADRMODE
+        ld  a,(ix+0)    ;obtain address mode
+        rlca
+        rlca
+        and a,%00001111
+        jp  z,a6502_build_calltable_normalModeImm
+        ld  hl,a6502_adrtype_table
+        ld  c,a
+        ld  b,3
+        mlt bc
+        add hl,bc
+        ld  bc,(hl)
+        ld  (iy+0),bc
+        lea iy,iy+3
+        ;BPUSH READ_MEMORY_ACCESS_IF_APPLICABLE
+        ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
+        ;Table pointers: write,read,rmw
+        ld  a,(ix+0)
+        and a,3     ;obtain memory mode
+        ;We may only push either READ OR READWRITE here.
+        ;If NONE or WRITE specified, we do not do anything here.
+        tst a,%00000010 ;z if none or write.
+        jr  z,+_
+        dec a
+        ld  c,a
+        ld  b,3
+        ld  hl,a6502_rwaccess_indtable
+        add hl,bc
+        ld  hl,(hl)
+        ld  (iy+0),hl
+        lea iy,iy+3
+_:      ;BPUSH INSFUNC
+        ld  a,(ix+1)    ;In format %IIIIIII-
+        rrca
+        and a,%01111111 ;Instruction ID
+        ld  c,a
+        ld  b,6
+        mlt bc
+        ld  hl,a6502_norm_func_table
+        add hl,bc
+        ld  a,(ix+0)    ;obtain address mode
+        rlca
+        rlca
+        and a,%00001111
+        cp  a,ADRMODE_ABS
+        jr  c,+_    ;if not abs or greater, use first entry, else entryHL
+        ld  bc,3
+        add hl,bc
+_:      ld  hl,(hl)
+        ld  (iy+0),hl
+        lea iy,iy+3
+        ;BPUSH WRITE_MEMORY_ACCESS_IF_APPLICABLE
+        ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
+        ;Table pointers: write,read,rmw
+        ld  a,(ix+0)
+        and a,3     ;obtain memory mode
+        tst a,%00000001 ;z if none or read
+        ;We may only push WRITE here. Skip if value here is 0 or 2.
+        ;If NONE or WRITE specified, we do not do anything here.
+        jr  z,+_
+        ld  hl,(a6502_rwaccess_indtable)    ;write-access
+        ld  (iy+0),hl
+        lea iy,iy+3
+_:      ;BPUSH RETURNADDRESS
+        ;a6502_newfetch_exx if memmode else a6502_newfetch
+        ld  hl,a6502_newfetch_exx
+        ld  a,(ix+0)
+        and a,3
+        jr  nz,+_
+        ld  hl,a6502_newfetch
+_:      ld  (iy+0),hl
+        jp  a6502_build_calltable_collectAfter
+a6502_build_calltable_normalModeImm:
+        ;Abbreviated normal mode for instructions that support operand IMM.
+        ;BPUSH INSFUNC
+        ld  a,(ix+1)    ;In format %IIIIIII-
+        rrca
+        and a,%01111111 ;Instruction ID
+        ld  c,a
+        ld  b,6
+        mlt bc
+        ld  hl,a6502_norm_func_table
+        add hl,bc
+        ld  hl,(hl)
+        dec hl          ;get to the "ld a,(hl)" prior to funcstart.
+        ld  (iy+0),hl
+        ld  hl,a6502_newfetch
+        ld  (iy+3),hl
+        jp  a6502_build_calltable_collectAfter
+a6502_build_calltable_skipNonspecialHandle:
+        cp  a,ISC_SPECIAL_NONMODED_LASTENTRY
+        jr  nc,a6502_build_calltable_skipSpecialHandle
+        ;Build table based on specialness.
+        sub a,ISC_NONSPECIAL_LASTENTRY
+        ld  hl,a6502_special_specific_case_func_table
+        jr  z,++_
+        ld  b,a
+_:      ld  a,(hl)
+        or  a,a
+        jr  z,$ ;halt if entry is dead. debug tool.
+        ld  e,a
+        ld  d,3
+        inc hl
+        mlt de
+        add hl,de
+        djnz -_
+_:      ld  a,(hl)
+        or  a,a
+        jr  z,$ ;this entry dead entry? lock up if so.
+        inc hl
+        ld  b,a
+        ld  c,3
+        mlt bc
+        lea de,iy+0
+        ldir
+        jp  a6502_build_calltable_collectAfter
+a6502_build_calltable_skipSpecialHandle:
+        sub a,ISC_SPECIAL_NONMODED_LASTENTRY
+        ;Build table based on normal table above, except the jump table has
+        ;an extra entry for split function before and after WRITE_ACCESS,
+        ;if the address mode specifies such accesses.
+        ;Address mode ADRMODE_SPEC is illegal in this context.
+        ;BPUSH ADRMODE
+        ld  a,(ix+0)    ;obtain address mode
+        rlca
+        rlca
+        and a,%00001111
+        jp  z,$     ;IMM NOT ALLOWED ON SPECIALMODED INSTRUCTIONS
+        ld  hl,a6502_adrtype_table
+        ld  c,a
+        ld  b,3
+        mlt bc
+        add hl,bc
+        ld  bc,(hl)
+        ld  (iy+0),bc
+        lea iy,iy+3
+        ;BPUSH READ_MEMORY_ACCESS_IF_APPLICABLE
+        ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
+        ;Table pointers: write,read,rmw
+        ld  a,(ix+0)
+        and a,3     ;obtain memory mode
+        ;We may only push either READ OR READWRITE here.
+        ;If NONE or WRITE specified, we do not do anything here.
+        tst a,%00000010 ;z if none or write.
+        jr  z,+_
+        dec a
+        ld  c,a
+        ld  b,3
+        ld  hl,a6502_rwaccess_indtable
+        add hl,bc
+        ld  hl,(hl)
+        ld  (iy+0),hl
+        lea iy,iy+3
+_:      ;BPUSH INSFUNC
+        ld  a,(ix+1)    ;In format %IIIIIII-
+        rrca
+        and a,%01111111 ;Instruction ID
+        ld  c,a
+        ld  b,9
+        mlt bc
+        ld  hl,a6502_special_moded_func_table
+        add hl,bc
+        ld  a,(ix+0)    ;obtain address mode
+        rlca
+        rlca
+        and a,%00001111
+        cp  a,ADRMODE_ABS
+        jr  c,+_    ;if not abs or greater, use first entry, else entryHL
+        ld  bc,3
+        add hl,bc
+_:      ld  hl,(hl)
+        ld  (iy+0),hl
+        lea iy,iy+3
+        ;BPUSH WRITE_MEMORY_ACCESS_IF_APPLICABLE
+        ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
+        ;Table pointers: write,read,rmw
+        ld  a,(ix+0)
+        and a,3     ;obtain memory mode
+        tst a,%00000001 ;z if none or read
+        ;We may only push WRITE here. Skip if value here is 0 or 2.
+        ;If NONE or WRITE specified, we do not do anything here.
+        jr  z,+_
+        ld  hl,(a6502_rwaccess_indtable)    ;write-access
+        ld  (iy+0),hl
+        ld  a,(ix+1)    ;If we wrote a WRITEACC, must put seg2 afterward.
+        rrca
+        and a,%01111111 ;Instruction ID
+        ld  c,a
+        ld  b,9
+        mlt bc
+        ld  hl,a6502_special_moded_func_table+6
+        add hl,bc
+        ld  hl,(hl)
+        ld  (iy+3),hl
+        lea iy,iy+6
+_:      ;BPUSH RETURNADDRESS
+        ;a6502_newfetch_exx if memmode else a6502_newfetch
+        ld  hl,a6502_newfetch_exx
+        ld  a,(ix+0)
+        and a,3
+        jr  nz,+_
+        ld  hl,a6502_newfetch
+_:      ld  (iy+0),hl
+a6502_build_calltable_collectAfter:
+    pop bc
+    inc b
+    jp  nz,a6502_build_calltable_mainLoop
+    ret
 
 
 
@@ -166,9 +417,10 @@ _:  ld  a,L
 ;==============================================================================
 
 ;:You probably shouldn't.
-a6502_adrmode_read_imm:
-    ld  a,(hl)
-    ret
+;EDIT. YOU SHALL NOT. THIS IS BEING BAKED INTO EACH INSTRUCTION.
+;a6502_adrmode_read_imm:
+;    ld  a,(hl)
+;    ret
 
 ;That ret is making it slow.
 a6502_adrmode_read_zp:
@@ -449,6 +701,7 @@ a6502_adrmode_write_indy:
 
 
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_lda:
     ld  (ix+REGA),a
     ld  b,a
@@ -458,6 +711,7 @@ a6502_inst_lda:
     ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_ldx:
     ld  (ix+REGX),a
     ld  b,a
@@ -467,6 +721,7 @@ a6502_inst_ldx:
     ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_ldy:
     ld  (ix+REGY),a
     ld  b,a
@@ -537,6 +792,7 @@ a6502_inst_inc_hl:
     ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_adc_bc:
 a6502_inst_adc_hl:
     ld  b,a
@@ -550,6 +806,7 @@ a6502_inst_adc_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_sbc_bc:
 a6502_inst_sbc_hl:
     ld  b,a
@@ -565,6 +822,7 @@ a6502_inst_sbc_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_and_bc:
 a6502_inst_and_hl:
     ld  b,a
@@ -580,6 +838,7 @@ a6502_inst_and_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_eor_bc:
 a6502_inst_eor_hl:
     ld  b,a
@@ -595,6 +854,7 @@ a6502_inst_eor_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_or_bc:
 a6502_inst_or_hl:
     ld  b,a
@@ -674,6 +934,7 @@ a6502_inst_ror_hl:
     ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_cmp_bc:
 a6502_inst_cmp_hl:
     ld  b,a
@@ -684,6 +945,7 @@ a6502_inst_cmp_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_cpx_bc:
 a6502_inst_cpx_hl:
     ld  b,a
@@ -694,6 +956,7 @@ a6502_inst_cpx_hl:
 _:  ex  af,af'
     ret
 ;------------------------------------------
+    ld  a,(hl)
 a6502_inst_cpy_bc:
 a6502_inst_cpy_hl:
     ld  b,a
@@ -798,6 +1061,7 @@ _:  sbc a,0
 _:  ex  af,af'
     ret
 ;------------------------------------------------------------------------------
+    ld  a,(hl)
 a6502_inst_lax_bc:
 a6502_inst_lax_hl:
     ld  (ix+REGA),a
@@ -1063,6 +1327,7 @@ a6502_inst_pha: ;flags not affected
     dec c
     ld  (ix+REGSP),c
     ret
+
 a6502_inst_php: ;Verify that the flags pushed are accurate.
     ex  af,af'
     push.s af
@@ -1441,6 +1706,8 @@ a6502_inst_rts:
 a6502_inst_nop:
     ret
 
+a6502_jamx:
+    jr $
 
 ;-------------------------------------------------------------------------------
 ; # #  #  ### ##  #  #     #  ##   ##  #  ##  ###  ##    #  #  ## ### # ##   ##                                      
@@ -1546,7 +1813,6 @@ a6502_inst_shx:     ;9E
 a6502_inst_shy:     ;9C
 a6502_inst_tas:     ;9B
 a6502_inst_usbc:    ;EB Map this to instruction $E9 (inst6502_sbc_imm)
-a6502_inst_lxa:
     ret
 
 
@@ -1576,7 +1842,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_SLO)    ;0F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BPL)    ;10
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ORA)    ;11
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;12
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_SLO)    ;13
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_SLO)    ;13
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;14
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ORA)    ;15
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ASL)    ;16
@@ -1584,11 +1850,11 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SLO)    ;17
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLC)    ;18
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ORA)    ;19
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;1A
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_SLO)    ;1B
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_SLO)    ;1B
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;1C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ORA)    ;1D
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ASL)    ;1E
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_SLO)    ;1F
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ASL)    ;1E
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_SLO)    ;1F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_JSR)    ;20
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_AND)    ;21
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;22
@@ -1608,7 +1874,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_RLA)    ;2F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BMI)    ;30
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_AND)    ;31
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;32
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_RLA)    ;33
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_RLA)    ;33
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;34
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_AND)    ;35
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROL)    ;36
@@ -1616,11 +1882,11 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RLA)    ;37
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEC)    ;38
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_AND)    ;39
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;3A
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_RLA)    ;3B
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_RLA)    ;3B
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;3C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_AND)    ;3D
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ROL)    ;3E
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_RLA)    ;3F
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ROL)    ;3E
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_RLA)    ;3F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTI)    ;40
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_EOR)    ;41
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;42
@@ -1640,7 +1906,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_SRE)    ;4F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVC)    ;50
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_EOR)    ;51
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;52
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_SRE)    ;53
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_SRE)    ;53
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;54
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_EOR)    ;55
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_LSR)    ;56
@@ -1648,11 +1914,11 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SRE)    ;57
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLI)    ;58
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_EOR)    ;59
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;5A
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_SRE)    ;5B
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_SRE)    ;5B
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;5C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_EOR)    ;5D
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_LSR)    ;5E
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_SRE)    ;5F
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_LSR)    ;5E
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_SRE)    ;5F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTS)    ;60
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_ADC)    ;61
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;62
@@ -1672,7 +1938,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_RRA)    ;6F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVS)    ;70
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ADC)    ;71
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;72
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_RRA)    ;73
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_RRA)    ;73
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;74
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ADC)    ;75
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROR)    ;76
@@ -1680,11 +1946,11 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RRA)    ;77
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEI)    ;78
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ADC)    ;79
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;7A
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_RRA)    ;7B
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_RRA)    ;7B
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;7C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ADC)    ;7D
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ROR)    ;7E
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_RRA)    ;7F
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ROR)    ;7E
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_RRA)    ;7F
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;80
 A6502T(MEMACC_W , ADRMODE_INDX, 6, ISC_STA)    ;81
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;82
@@ -1702,21 +1968,21 @@ A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STA)    ;8D
 A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STX)    ;8E
 A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_SAX)    ;8F
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BCC)    ;90
-A6502T(MEMACC_W , ADRMODE_INDY, 6, ISC_STA)    ;91
+A6502T(MEMACC_W , ADRMODE_INDYF, 6, ISC_STA)    ;91
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;92
-A6502T(MEMACC_RW, ADRMODE_INDY, 6, ISC_SHA)    ;93
+A6502T(MEMACC_RW, ADRMODE_INDYF, 6, ISC_SHA)    ;93
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_STY)    ;94
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_STA)    ;95
 A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_STX)    ;96
 A6502T(MEMACC_NO, ADRMODE_ZPY , 4, ISC_SAX)    ;97
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TYA)    ;98
-A6502T(MEMACC_W , ADRMODE_ABSY, 5, ISC_STA)    ;99
+A6502T(MEMACC_W , ADRMODE_ABSYF, 5, ISC_STA)    ;99
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TXS)    ;9A
 A6502T(MEMACC_R , ADRMODE_ABSY, 5, ISC_TAS)    ;9B
 A6502T(MEMACC_R , ADRMODE_ABSX, 5, ISC_SHY)    ;9C
-A6502T(MEMACC_W , ADRMODE_ABSX, 5, ISC_STA)    ;9D
+A6502T(MEMACC_W , ADRMODE_ABSXF, 5, ISC_STA)    ;9D
 A6502T(MEMACC_R , ADRMODE_ABSY, 5, ISC_SHX)    ;9E
-A6502T(MEMACC_RW, ADRMODE_ABSY, 5, ISC_SHA)    ;9F
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 5, ISC_SHA)    ;9F
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LDY)    ;A0
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_LDA)    ;A1
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_LDX)    ;A2
@@ -1768,7 +2034,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_DCP)    ;CF
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BNE)    ;D0
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_CMP)    ;D1
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;D2
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_DCP)    ;D3
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_DCP)    ;D3
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;D4
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_CMP)    ;D5
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DEC)    ;D6
@@ -1776,11 +2042,11 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DCP)    ;D7
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLD)    ;D8
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_CMP)    ;D9
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;DA
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_DCP)    ;DB
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_DCP)    ;DB
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;DC
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_CMP)    ;DD
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_DEC)    ;DE
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_DCP)    ;DF
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_DEC)    ;DE
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_DCP)    ;DF
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CPX)    ;E0
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_SBC)    ;E1
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;E2
@@ -1800,7 +2066,7 @@ A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ISC)    ;EF
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BEQ)    ;F0
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_SBC)    ;F1
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;F2
-A6502T(MEMACC_RW, ADRMODE_INDY, 8, ISC_ISC)    ;F3
+A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_ISC)    ;F3
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;F4
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_SBC)    ;F5
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_INC)    ;F6
@@ -1808,11 +2074,12 @@ A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ISC)    ;F7
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SED)    ;F8
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_SBC)    ;F9
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;FA
-A6502T(MEMACC_RW, ADRMODE_ABSY, 7, ISC_ISC)    ;FB
+A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_ISC)    ;FB
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;FC
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_SBC)    ;FD
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_INC)    ;FE
-A6502T(MEMACC_RW, ADRMODE_ABSX, 7, ISC_ISC)    ;FF
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_INC)    ;FE
+A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ISC)    ;FF
+a6502_main_table_end:
 
 a6502_norm_func_table:
 .dl a6502_inst_tas    ,a6502_inst_tas       ;ISC_TAS .equ 0
@@ -1871,9 +2138,9 @@ a6502_special_specific_case_func_table:
 .db 2 \.dl a6502_inst_txs, a6502_getInstruction ;ISC_TXS  .equ 38
 .db 2 \.dl a6502_inst_tya, a6502_getInstruction ;ISC_TYA  .equ 39
 .db 2 \.dl a6502_inst_pha, a6502_getInstruction ;ISC_PHA  .equ 40
-.db 2 \.dl               ;ISC_PHP  .equ 41
+.db 2 \.dl a6502_inst_php, a6502_getInstruction ;ISC_PHP  .equ 41
 .db 2 \.dl a6502_inst_pla, a6502_getInstruction ;ISC_PLA  .equ 42
-.db 2 \.dl               ;ISC_PLP  .equ 43
+.db 2 \.dl a6502_inst_plp, a6502_getInstruction ;ISC_PLP  .equ 43
 .db 2 \.dl a6502_inst_dex, a6502_getInstruction ;ISC_DEX  .equ 44
 .db 2 \.dl a6502_inst_dey, a6502_getInstruction ;ISC_DEY  .equ 45
 .db 2 \.dl a6502_inst_inx, a6502_getInstruction ;ISC_INX  .equ 46
@@ -1889,27 +2156,40 @@ a6502_special_specific_case_func_table:
 .db 2 \.dl a6502_inst_sec, a6502_getInstruction ;ISC_SEC  .equ 56
 .db 2 \.dl a6502_inst_sed, a6502_getInstruction ;ISC_SED  .equ 57
 .db 2 \.dl a6502_inst_sei, a6502_getInstruction ;ISC_SEI  .equ 58
-.db  \.dl               ;ISC_BCC  .equ 59
-.db  \.dl               ;ISC_BCS  .equ 60
-.db  \.dl               ;ISC_BEQ  .equ 61
-.db  \.dl               ;ISC_BMI  .equ 62
-.db  \.dl               ;ISC_BNE  .equ 63
-.db  \.dl               ;ISC_BPL  .equ 64
-.db  \.dl               ;ISC_BVC  .equ 65
-.db  \.dl               ;ISC_BVS  .equ 66
-.db  \.dl               ;ISC_BRK  .equ 67
-.db  \.dl               ;ISC_RTI  .equ 68
-.db  \.dl               ;ISC_RTS  .equ 69
-.db  \.dl               ;ISC_NOP  .equ 70
-.db  \.dl               ;ISC_JAMX .equ 71
-.db  \.dl               ;ISC_JSR   .equ 72
-.db  \.dl               ;ISC_JMPA .equ 73
-.db  \.dl               ;ISC_JMPI  .equ 74
-.db  \.dl               ;ISC_JAM   .equ 75
+.db 2 \.dl a6502_inst_bcc, a6502_newfetch       ;ISC_BCC  .equ 59
+.db 2 \.dl a6502_inst_bcs, a6502_newfetch       ;ISC_BCS  .equ 60
+.db 2 \.dl a6502_inst_beq, a6502_newfetch       ;ISC_BEQ  .equ 61
+.db 2 \.dl a6502_inst_bmi, a6502_newfetch       ;ISC_BMI  .equ 62
+.db 2 \.dl a6502_inst_bne, a6502_newfetch       ;ISC_BNE  .equ 63
+.db 2 \.dl a6502_inst_bpl, a6502_newfetch       ;ISC_BPL  .equ 64
+.db 2 \.dl a6502_inst_bvc, a6502_newfetch       ;ISC_BVC  .equ 65
+.db 2 \.dl a6502_inst_bvs, a6502_newfetch       ;ISC_BVS  .equ 66
+.db 2 \.dl a6502_inst_brk, a6502_reload_then_getInstruction ;ISC_BRK  .equ 67
+.db 2 \.dl a6502_inst_rti, a6502_reload_then_getInstruction ;ISC_RTI  .equ 68
+.db 2 \.dl a6502_inst_rts, a6502_reload_then_getInstruction ;ISC_RTS  .equ 69
+.db 1 \.dl a6502_getInstruction                             ;ISC_NOP  .equ 70
+.db 2 \.dl a6502_jamx, a6502_reload_then_getInstruction     ;ISC_JAMX .equ 71
+.db 2 \.dl a6502_inst_jsr, a6502_reload_then_getInstruction ;ISC_JSR   .equ 72
+.db 2 \.dl a6502_inst_jmp_abs, a6502_reload_then_getInstruction ;ISC_JMPA .equ 73
+.db 2 \.dl a6502_inst_jmp_ind, a6502_reload_then_getInstruction ;ISC_JMPI  .equ 74
+.db 2 \.dl a6502_jamx, a6502_reload_then_getInstruction     ;ISC_JAM   .equ 75
+.db 0
 
-
-
-
+a6502_adrtype_table:
+.dl 0                        ;ADRMODE_IMM     .equ 0
+.dl a6502_adrmode_read_zp    ;ADRMODE_ZP      .equ 1
+.dl a6502_adrmode_read_zpx   ;ADRMODE_ZPX     .equ 2
+.dl a6502_adrmode_read_zpy   ;ADRMODE_ZPY     .equ 3
+.dl a6502_adrmode_read_abs   ;ADRMODE_ABS     .equ 4
+.dl a6502_adrmode_read_absx  ;ADRMODE_ABSX    .equ 5
+.dl a6502_adrmode_read_absy  ;ADRMODE_ABSY    .equ 6
+.dl 0                        ;ADRMODE_IND     .equ 7
+.dl a6502_adrmode_read_indx  ;ADRMODE_INDX    .equ 8
+.dl a6502_adrmode_read_indy  ;ADRMODE_INDY    .equ 9
+.dl a6502_adrmode_write_absx ;ADRMODE_ABSXF   .equ 10
+.dl a6502_adrmode_write_absy ;ADRMODE_ABSYF   .equ 11
+.dl a6502_adrmode_write_indy ;ADRMODE_INDYF   .equ 12
+.dl 0                        ;ADRMODE_SPEC    .equ 13 
 
 
 

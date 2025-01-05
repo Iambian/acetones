@@ -765,13 +765,22 @@ _:  ld  d,a
     ld  de,mapper_table
     add hl,de
     ld  (mapper_adr_base),hl
+    push hl
+        inc hl
+        inc hl
+        inc hl
+        ld  bc,9
+        ld  de,write_access_ptr
+        ldir
+    pop hl
     ld  hl,(hl)     ;load mapper init location
     jp  (hl)        ;Do the jump
 
 mapper_table:   ;entries 9 wide
 .dl mapper0_init
-.dl mapper0_read
 .dl mapper0_write
+.dl mapper0_read
+.dl mapper0_write   ;replace with RMW
 
 mapper0_init:
     ;map trainer, if exist
