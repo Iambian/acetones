@@ -131,6 +131,18 @@ _:  inc hl
     jr  nz,a6502_nestest_verify_timing_failed
     cp  a,(ix+REGSR)
     jr  nz,a6502_nestest_verify_flags_failed
+#if AUTONESTEST_SHOW > 0
+_:  call setFullScreenMode
+    ld  hl,-_
+    ld  de,-_+1
+    ld  bc,3
+    ld  (hl),0
+    ldir
+    call newPage
+    ld  hl,a6502_cpu_state_buffer+(10*28)
+    call a6502_debug_printout
+    call fastCopy
+#endif
     ret
 
 

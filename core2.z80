@@ -175,6 +175,7 @@ a6502_getInstruction:
     #endif
     ;Fetch instruction, then advance PC
     ld  a,(hl)
+    ;cp  a,$FC   \   jr z,$
     inc hl
     inc e
     jr  z,a6502_nextargfetch_pagecross
@@ -271,9 +272,9 @@ a6502_build_calltable:
     ld  ix,a6502_main_table
 a6502_build_calltable_mainLoop:
     push bc
-        ;ld  a,b
-        ;cp  a,$86
-        ;jr  z,$
+        ld  a,b
+        cp  a,$C3
+        jr  z,$
         ld  c,BASETABLE_STRIDE
         mlt bc
         ld  hl,CALLTABLE
@@ -619,7 +620,9 @@ a6502_adrmode_read_absx:
     ld  c,BASETABLE_STRIDE
     ld  b,d
     mlt bc
+    ld  hl,PAGETABLE
     add hl,bc
+    ld  hl,(hl)
 _:  exx
     add a,(ix+REGX)         ;add X to abs lsb
     ld  e,a                 ;and store to shadow E
@@ -652,7 +655,9 @@ a6502_adrmode_read_absy:
     ld  c,BASETABLE_STRIDE
     ld  b,d
     mlt bc
+    ld  hl,PAGETABLE
     add hl,bc
+    ld  hl,(hl)
 _:  exx
     add a,(ix+REGY)
     ld  e,a                 ;and store to shadow E
@@ -686,7 +691,9 @@ a6502_adrmode_write_absx:
     ld  c,BASETABLE_STRIDE
     ld  b,d
     mlt bc
+    ld  hl,PAGETABLE
     add hl,bc
+    ld  hl,(hl)
 _:  exx
     add a,(ix+REGX)
     ld  e,a     ;LSB
@@ -718,7 +725,9 @@ a6502_adrmode_write_absy:
     ld  c,BASETABLE_STRIDE
     ld  b,d
     mlt bc
+    ld  hl,PAGETABLE
     add hl,bc
+    ld  hl,(hl)
 _:  exx
     add a,(ix+REGY)
     ld  e,a     ;LSB
@@ -1679,7 +1688,8 @@ inst6502_brk_from_handler:
 
 ;return to full HL:E reload
 a6502_inst_brk:
-    ld.s de,(ix+REGPC)
+    ;jr $
+    ld.s d,(ix+REGPC)
     inc de      ;that extra spacer.
 _:  ld  hl,STACKBASE
     ld  L,(ix+REGSP)
@@ -1716,7 +1726,7 @@ _:  ld  hl,(BASETABLE_STRIDE*$FF)+PAGETABLE
 
 ;Return to full HL:E reload
 a6502_inst_rti:
-    ld  bc,STACKBASE
+    ld  hl,STACKBASE
     ld  L,(ix+REGSP)
     inc L
     ld  a,(hl)
@@ -1725,7 +1735,7 @@ a6502_inst_rti:
     inc L
     ld  d,(hl)
     ld  (ix+REGSP),L
-    ld.s (ix+REGSP),de
+    ld.s (ix+REGPC),de
     ld  b,(ix+REGSR)
     xor a,b
     and a,%11001111
@@ -1775,6 +1785,7 @@ a6502_inf_loop_detected:
 
 ;return to full HL:E reload
 a6502_inst_jmp_ind:
+    ;jr $
     ld  bc,PAGETABLE
     ld  a,(hl)
     inc hl
@@ -1789,7 +1800,7 @@ a6502_inst_jmp_ind:
 _:  ld  h,(hl)  ;high byte destination address
     ld  L,a     ;low byte destination address
     inc L       ;Check if there will be a split read.
-    ld  h,BASETABLE_STRIDE
+    ld  L,BASETABLE_STRIDE
     mlt hl
     jr  z,+_        ;jump if split read.
     add hl,bc       ;add high byte offset into pagetable
@@ -1975,7 +1986,7 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 7, ISC_BRK)    ;00
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_ORA)    ;01
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;02
 A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_SLO)    ;03
-A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;04
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_NOPM)    ;04
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_ORA)    ;05
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ASL)    ;06
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_SLO)    ;07
@@ -1983,7 +1994,7 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 3, ISC_PHP)    ;08
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ORA)    ;09
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_ASLA)    ;0A
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ANC)    ;0B
-A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_JAMX)    ;0C
+A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_NOPM)    ;0C
 A6502T(MEMACC_R , ADRMODE_ABS , 4, ISC_ORA)    ;0D
 A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_ASL)    ;0E
 A6502T(MEMACC_RW, ADRMODE_ABS , 6, ISC_SLO)    ;0F
@@ -1991,15 +2002,15 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BPL)    ;10
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ORA)    ;11
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;12
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_SLO)    ;13
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;14
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;14
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ORA)    ;15
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ASL)    ;16
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SLO)    ;17
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLC)    ;18
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ORA)    ;19
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;1A
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;1A
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_SLO)    ;1B
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;1C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;1C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ORA)    ;1D
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ASL)    ;1E
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_SLO)    ;1F
@@ -2023,15 +2034,15 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BMI)    ;30
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_AND)    ;31
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;32
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_RLA)    ;33
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;34
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;34
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_AND)    ;35
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROL)    ;36
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RLA)    ;37
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEC)    ;38
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_AND)    ;39
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;3A
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;3A
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_RLA)    ;3B
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;3C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;3C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_AND)    ;3D
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ROL)    ;3E
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_RLA)    ;3F
@@ -2039,7 +2050,7 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTI)    ;40
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_EOR)    ;41
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;42
 A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_SRE)    ;43
-A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;44
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_NOPM)    ;44
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_EOR)    ;45
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_LSR)    ;46
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_SRE)    ;47
@@ -2055,15 +2066,15 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVC)    ;50
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_EOR)    ;51
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;52
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_SRE)    ;53
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;54
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;54
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_EOR)    ;55
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_LSR)    ;56
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_SRE)    ;57
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLI)    ;58
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_EOR)    ;59
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;5A
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;5A
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_SRE)    ;5B
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;5C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;5C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_EOR)    ;5D
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_LSR)    ;5E
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_SRE)    ;5F
@@ -2071,7 +2082,7 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 6, ISC_RTS)    ;60
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_ADC)    ;61
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;62
 A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_RRA)    ;63
-A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_JAMX)    ;64
+A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_NOPM)    ;64
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_ADC)    ;65
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_ROR)    ;66
 A6502T(MEMACC_NO, ADRMODE_ZP  , 5, ISC_RRA)    ;67
@@ -2087,28 +2098,28 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BVS)    ;70
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_ADC)    ;71
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;72
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_RRA)    ;73
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;74
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;74
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_ADC)    ;75
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ROR)    ;76
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_RRA)    ;77
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SEI)    ;78
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_ADC)    ;79
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;7A
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;7A
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_RRA)    ;7B
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;7C
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;7C
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_ADC)    ;7D
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ROR)    ;7E
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_RRA)    ;7F
-A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;80
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_NOPM)    ;80
 A6502T(MEMACC_W , ADRMODE_INDX, 6, ISC_STA)    ;81
-A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;82
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_NOPM)    ;82
 A6502T(MEMACC_W , ADRMODE_INDX, 6, ISC_SAX)    ;83
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STY)    ;84
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STA)    ;85
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_STX)    ;86
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_SAX)    ;87
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_DEY)    ;88
-A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;89
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_NOPM)    ;89
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_TXA)    ;8A
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_ANE)    ;8B
 A6502T(MEMACC_W , ADRMODE_ABS , 4, ISC_STY)    ;8C
@@ -2165,7 +2176,7 @@ A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LDX)    ;BE
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_LAX)    ;BF
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CPY)    ;C0
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_CMP)    ;C1
-A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;C2
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_NOPM)    ;C2
 A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_DCP)    ;C3
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CPY)    ;C4
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CMP)    ;C5
@@ -2183,21 +2194,21 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BNE)    ;D0
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_CMP)    ;D1
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;D2
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_DCP)    ;D3
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;D4
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;D4
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_CMP)    ;D5
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DEC)    ;D6
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_DCP)    ;D7
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_CLD)    ;D8
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_CMP)    ;D9
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;DA
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;DA
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_DCP)    ;DB
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;DC
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;DC
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_CMP)    ;DD
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_DEC)    ;DE
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_DCP)    ;DF
 A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_CPX)    ;E0
 A6502T(MEMACC_R , ADRMODE_INDX, 6, ISC_SBC)    ;E1
-A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_JAMX)    ;E2
+A6502T(MEMACC_NO, ADRMODE_IMM , 2, ISC_NOPM)    ;E2
 A6502T(MEMACC_RW, ADRMODE_INDX, 8, ISC_ISC)    ;E3
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_CPX)    ;E4
 A6502T(MEMACC_NO, ADRMODE_ZP  , 3, ISC_SBC)    ;E5
@@ -2215,113 +2226,114 @@ A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_BEQ)    ;F0
 A6502T(MEMACC_R , ADRMODE_INDY, 5, ISC_SBC)    ;F1
 A6502T(MEMACC_NO, ADRMODE_SPEC, 4, ISC_JAM)    ;F2
 A6502T(MEMACC_RW, ADRMODE_INDYF, 8, ISC_ISC)    ;F3
-A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_JAMX)    ;F4
+A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_NOPM)    ;F4
 A6502T(MEMACC_NO, ADRMODE_ZPX , 4, ISC_SBC)    ;F5
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_INC)    ;F6
 A6502T(MEMACC_NO, ADRMODE_ZPX , 6, ISC_ISC)    ;F7
 A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_SED)    ;F8
 A6502T(MEMACC_R , ADRMODE_ABSY, 4, ISC_SBC)    ;F9
-A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_JAMX)    ;FA
+A6502T(MEMACC_NO, ADRMODE_SPEC, 2, ISC_NOPI)    ;FA
 A6502T(MEMACC_RW, ADRMODE_ABSYF, 7, ISC_ISC)    ;FB
-A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_JAMX)    ;FC
+A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_NOPM)    ;FC
 A6502T(MEMACC_R , ADRMODE_ABSX, 4, ISC_SBC)    ;FD
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_INC)    ;FE
 A6502T(MEMACC_RW, ADRMODE_ABSXF, 7, ISC_ISC)    ;FF
 a6502_main_table_end:
 
 a6502_norm_func_table:
-.dl a6502_inst_tas    ,a6502_inst_tas       ;ISC_TAS .equ 0
-.dl a6502_inst_shy    ,a6502_inst_shy       ;ISC_SHY .equ 1
-.dl a6502_inst_shx    ,a6502_inst_shx       ;ISC_SHX .equ 2
-.dl a6502_inst_sha    ,a6502_inst_sha       ;ISC_SHA .equ 3
-.dl a6502_inst_sbx    ,a6502_inst_sbx       ;ISC_SBX .equ 4
-.dl a6502_inst_sax_bc ,a6502_inst_sax_hl    ;ISC_SAX .equ 5
-.dl a6502_inst_lxa    ,a6502_inst_lxa       ;ISC_LXA .equ 6
-.dl a6502_inst_lax_bc ,a6502_inst_lax_hl    ;ISC_LAX .equ 7
-.dl a6502_inst_las    ,a6502_inst_las       ;ISC_LAS .equ 8
-.dl a6502_inst_arr    ,a6502_inst_arr       ;ISC_ARR .equ 9
-.dl a6502_inst_ane    ,a6502_inst_ane       ;ISC_ANE .equ 10
-.dl a6502_inst_anc    ,a6502_inst_anc       ;ISC_ANC .equ 11
-.dl a6502_inst_alr    ,a6502_inst_alr       ;ISC_ALR .equ 12
-.dl a6502_inst_bit_bc ,a6502_inst_bit_hl    ;ISC_BIT .equ 13
-.dl a6502_inst_cpy_bc ,a6502_inst_cpy_hl    ;ISC_CPY .equ 14
-.dl a6502_inst_cpx_bc ,a6502_inst_cpx_hl    ;ISC_CPX .equ 15
-.dl a6502_inst_cmp_bc ,a6502_inst_cmp_hl   ;ISC_CMP .equ 16
-.dl a6502_inst_ror_bc ,a6502_inst_ror_hl   ;ISC_ROR .equ 17
-.dl a6502_inst_rol_bc ,a6502_inst_rol_hl   ;ISC_ROL .equ 18
-.dl a6502_inst_lsr_bc ,a6502_inst_lsr_hl   ;ISC_LSR .equ 19
-.dl a6502_inst_asl_bc ,a6502_inst_asl_hl   ;ISC_ASL .equ 20
-.dl a6502_inst_or_bc  ,a6502_inst_or_hl    ;ISC_ORA .equ 21
-.dl a6502_inst_eor_bc ,a6502_inst_eor_hl   ;ISC_EOR .equ 22
-.dl a6502_inst_and_bc ,a6502_inst_and_hl   ;ISC_AND .equ 23
-.dl a6502_inst_sbc_bc ,a6502_inst_sbc_hl   ;ISC_SBC .equ 24
-.dl a6502_inst_adc_bc ,a6502_inst_adc_hl   ;ISC_ADC .equ 25
-.dl a6502_inst_inc_bc ,a6502_inst_inc_hl   ;ISC_INC .equ 26
-.dl a6502_inst_dec_bc ,a6502_inst_dec_hl   ;ISC_DEC .equ 27
-.dl a6502_inst_sty_bc ,a6502_inst_sty_hl   ;ISC_STY .equ 28
-.dl a6502_inst_stx_bc ,a6502_inst_stx_hl   ;ISC_STX .equ 29
-.dl a6502_inst_sta_bc ,a6502_inst_sta_hl   ;ISC_STA .equ 30
-.dl a6502_inst_ldy ,a6502_inst_ldy         ;ISC_LDY .equ 31
-.dl a6502_inst_ldx ,a6502_inst_ldx         ;ISC_LDX .equ 32
-.dl a6502_inst_lda ,a6502_inst_lda         ;ISC_LDA .equ 33
-
-a6502_special_moded_func_table:
-.dl a6502_inst_sre_bc,a6502_inst_sre_hl_seg1,a6502_inst_sre_hl_seg2 ;ISC_SRE .equ 76
-.dl a6502_inst_slo_bc,a6502_inst_slo_hl_seg1,a6502_inst_slo_hl_seg2 ;ISC_SLO .equ 77
-.dl a6502_inst_rra_bc,a6502_inst_rra_hl_seg1,a6502_inst_rra_hl_seg2 ;ISC_RRA .equ 78
-.dl a6502_inst_rla_bc,a6502_inst_rla_hl_seg1,a6502_inst_rla_hl_seg2 ;ISC_RLA .equ 79
-.dl a6502_inst_isc_bc,a6502_inst_isc_hl_seg1,a6502_inst_isc_hl_seg2 ;ISC_ISC .equ 80
-.dl a6502_inst_dcp_bc,a6502_inst_dcp_hl_seg1,a6502_inst_dcp_hl_seg2 ;ISC_DCP .equ 81
-
-
+.dl a6502_inst_nop    ,a6502_inst_nop      ;ISC_NOPM .equ 0 
+.dl a6502_inst_tas    ,a6502_inst_tas      ;ISC_TAS  .equ 1 
+.dl a6502_inst_shy    ,a6502_inst_shy      ;ISC_SHY  .equ 2 
+.dl a6502_inst_shx    ,a6502_inst_shx      ;ISC_SHX  .equ 3 
+.dl a6502_inst_sha    ,a6502_inst_sha      ;ISC_SHA  .equ 4 
+.dl a6502_inst_sbx    ,a6502_inst_sbx      ;ISC_SBX  .equ 5 
+.dl a6502_inst_sax_bc ,a6502_inst_sax_hl   ;ISC_SAX  .equ 6 
+.dl a6502_inst_lxa    ,a6502_inst_lxa      ;ISC_LXA  .equ 7 
+.dl a6502_inst_lax_bc ,a6502_inst_lax_hl   ;ISC_LAX  .equ 8 
+.dl a6502_inst_las    ,a6502_inst_las      ;ISC_LAS  .equ 9 
+.dl a6502_inst_arr    ,a6502_inst_arr      ;ISC_ARR  .equ 10
+.dl a6502_inst_ane    ,a6502_inst_ane      ;ISC_ANE  .equ 11
+.dl a6502_inst_anc    ,a6502_inst_anc      ;ISC_ANC  .equ 12
+.dl a6502_inst_alr    ,a6502_inst_alr      ;ISC_ALR  .equ 13
+.dl a6502_inst_bit_bc ,a6502_inst_bit_hl   ;ISC_BIT  .equ 14
+.dl a6502_inst_cpy_bc ,a6502_inst_cpy_hl   ;ISC_CPY  .equ 15
+.dl a6502_inst_cpx_bc ,a6502_inst_cpx_hl   ;ISC_CPX  .equ 16
+.dl a6502_inst_cmp_bc ,a6502_inst_cmp_hl   ;ISC_CMP  .equ 17
+.dl a6502_inst_ror_bc ,a6502_inst_ror_hl   ;ISC_ROR  .equ 18
+.dl a6502_inst_rol_bc ,a6502_inst_rol_hl   ;ISC_ROL  .equ 19
+.dl a6502_inst_lsr_bc ,a6502_inst_lsr_hl   ;ISC_LSR  .equ 20
+.dl a6502_inst_asl_bc ,a6502_inst_asl_hl   ;ISC_ASL  .equ 21
+.dl a6502_inst_or_bc  ,a6502_inst_or_hl    ;ISC_ORA  .equ 22
+.dl a6502_inst_eor_bc ,a6502_inst_eor_hl   ;ISC_EOR  .equ 23
+.dl a6502_inst_and_bc ,a6502_inst_and_hl   ;ISC_AND  .equ 24
+.dl a6502_inst_sbc_bc ,a6502_inst_sbc_hl   ;ISC_SBC  .equ 25
+.dl a6502_inst_adc_bc ,a6502_inst_adc_hl   ;ISC_ADC  .equ 26
+.dl a6502_inst_inc_bc ,a6502_inst_inc_hl   ;ISC_INC  .equ 27
+.dl a6502_inst_dec_bc ,a6502_inst_dec_hl   ;ISC_DEC  .equ 28
+.dl a6502_inst_sty_bc ,a6502_inst_sty_hl   ;ISC_STY  .equ 29
+.dl a6502_inst_stx_bc ,a6502_inst_stx_hl   ;ISC_STX  .equ 30
+.dl a6502_inst_sta_bc ,a6502_inst_sta_hl   ;ISC_STA  .equ 31
+.dl a6502_inst_ldy ,a6502_inst_ldy         ;ISC_LDY  .equ 32
+.dl a6502_inst_ldx ,a6502_inst_ldx         ;ISC_LDX  .equ 33
+.dl a6502_inst_lda ,a6502_inst_lda         ;ISC_LDA  .equ 34
 
 ;Note: Register timings are always in the main table. You should be using that
 ;to retrieve instruction timings. DO NOT INCLUDE THAT INFORMATION HERE.
 
 a6502_special_specific_case_func_table:
-.db 2 \.dl a6502_inst_tax, a6502_getInstruction ;ISC_TAX   .equ 34
-.db 2 \.dl a6502_inst_tay, a6502_getInstruction ;ISC_TAY  .equ 35
-.db 2 \.dl a6502_inst_tsx, a6502_getInstruction ;ISC_TSX  .equ 36
-.db 2 \.dl a6502_inst_txa, a6502_getInstruction ;ISC_TXA  .equ 37
-.db 2 \.dl a6502_inst_txs, a6502_getInstruction ;ISC_TXS  .equ 38
-.db 2 \.dl a6502_inst_tya, a6502_getInstruction ;ISC_TYA  .equ 39
-.db 2 \.dl a6502_inst_pha, a6502_getInstruction ;ISC_PHA  .equ 40
-.db 2 \.dl a6502_inst_php, a6502_getInstruction ;ISC_PHP  .equ 41
-.db 2 \.dl a6502_inst_pla, a6502_getInstruction ;ISC_PLA  .equ 42
-.db 2 \.dl a6502_inst_plp, a6502_getInstruction ;ISC_PLP  .equ 43
-.db 2 \.dl a6502_inst_dex, a6502_getInstruction ;ISC_DEX  .equ 44
-.db 2 \.dl a6502_inst_dey, a6502_getInstruction ;ISC_DEY  .equ 45
-.db 2 \.dl a6502_inst_inx, a6502_getInstruction ;ISC_INX  .equ 46
-.db 2 \.dl a6502_inst_iny, a6502_getInstruction ;ISC_INY  .equ 47
-.db 2 \.dl a6502_inst_asl, a6502_getInstruction ;ISC_ASLA .equ 48
-.db 2 \.dl a6502_inst_lsr, a6502_getInstruction ;ISC_LSRA  .equ 49
-.db 2 \.dl a6502_inst_rol, a6502_getInstruction ;ISC_ROLA  .equ 50
-.db 2 \.dl a6502_inst_ror, a6502_getInstruction ;ISC_RORA  .equ 51
-.db 2 \.dl a6502_inst_clc, a6502_getInstruction ;ISC_CLC   .equ 52
-.db 2 \.dl a6502_inst_cld, a6502_getInstruction ;ISC_CLD  .equ 53
-.db 2 \.dl a6502_inst_cli, a6502_getInstruction ;ISC_CLI  .equ 54
-.db 2 \.dl a6502_inst_clv, a6502_getInstruction ;ISC_CLV  .equ 55
-.db 2 \.dl a6502_inst_sec, a6502_getInstruction ;ISC_SEC  .equ 56
-.db 2 \.dl a6502_inst_sed, a6502_getInstruction ;ISC_SED  .equ 57
-.db 2 \.dl a6502_inst_sei, a6502_getInstruction ;ISC_SEI  .equ 58
-.db 2 \.dl a6502_inst_bcc, a6502_newfetch       ;ISC_BCC  .equ 59
-.db 2 \.dl a6502_inst_bcs, a6502_newfetch       ;ISC_BCS  .equ 60
-.db 2 \.dl a6502_inst_beq, a6502_newfetch       ;ISC_BEQ  .equ 61
-.db 2 \.dl a6502_inst_bmi, a6502_newfetch       ;ISC_BMI  .equ 62
-.db 2 \.dl a6502_inst_bne, a6502_newfetch       ;ISC_BNE  .equ 63
-.db 2 \.dl a6502_inst_bpl, a6502_newfetch       ;ISC_BPL  .equ 64
-.db 2 \.dl a6502_inst_bvc, a6502_newfetch       ;ISC_BVC  .equ 65
-.db 2 \.dl a6502_inst_bvs, a6502_newfetch       ;ISC_BVS  .equ 66
-.db 2 \.dl a6502_inst_brk, a6502_reload_then_getInstruction ;ISC_BRK  .equ 67
-.db 2 \.dl a6502_inst_rti, a6502_reload_then_getInstruction ;ISC_RTI  .equ 68
-.db 2 \.dl a6502_inst_rts, a6502_reload_then_getInstruction ;ISC_RTS  .equ 69
-.db 1 \.dl a6502_getInstruction                             ;ISC_NOP  .equ 70
-.db 2 \.dl a6502_jamx, a6502_reload_then_getInstruction     ;ISC_JAMX .equ 71
-.db 2 \.dl a6502_inst_jsr, a6502_reload_then_getInstruction ;ISC_JSR   .equ 72
-.db 2 \.dl a6502_inst_jmp_abs, a6502_reload_then_getInstruction ;ISC_JMPA .equ 73
-.db 2 \.dl a6502_inst_jmp_ind, a6502_reload_then_getInstruction ;ISC_JMPI  .equ 74
-.db 2 \.dl a6502_jamx, a6502_reload_then_getInstruction     ;ISC_JAM   .equ 75
+.db 2 \.dl a6502_inst_tax, a6502_getInstruction ;ISC_TAX  .equ 35
+.db 2 \.dl a6502_inst_tay, a6502_getInstruction ;ISC_TAY  .equ 36
+.db 2 \.dl a6502_inst_tsx, a6502_getInstruction ;ISC_TSX  .equ 37
+.db 2 \.dl a6502_inst_txa, a6502_getInstruction ;ISC_TXA  .equ 38
+.db 2 \.dl a6502_inst_txs, a6502_getInstruction ;ISC_TXS  .equ 39
+.db 2 \.dl a6502_inst_tya, a6502_getInstruction ;ISC_TYA  .equ 40
+.db 2 \.dl a6502_inst_pha, a6502_getInstruction ;ISC_PHA  .equ 41
+.db 2 \.dl a6502_inst_php, a6502_getInstruction ;ISC_PHP  .equ 42
+.db 2 \.dl a6502_inst_pla, a6502_getInstruction ;ISC_PLA  .equ 43
+.db 2 \.dl a6502_inst_plp, a6502_getInstruction ;ISC_PLP  .equ 44
+.db 2 \.dl a6502_inst_dex, a6502_getInstruction ;ISC_DEX  .equ 45
+.db 2 \.dl a6502_inst_dey, a6502_getInstruction ;ISC_DEY  .equ 46
+.db 2 \.dl a6502_inst_inx, a6502_getInstruction ;ISC_INX  .equ 47
+.db 2 \.dl a6502_inst_iny, a6502_getInstruction ;ISC_INY  .equ 48
+.db 2 \.dl a6502_inst_asl, a6502_getInstruction ;ISC_ASLA .equ 49
+.db 2 \.dl a6502_inst_lsr, a6502_getInstruction ;ISC_LSRA .equ 50
+.db 2 \.dl a6502_inst_rol, a6502_getInstruction ;ISC_ROLA .equ 51
+.db 2 \.dl a6502_inst_ror, a6502_getInstruction ;ISC_RORA .equ 52
+.db 2 \.dl a6502_inst_clc, a6502_getInstruction ;ISC_CLC  .equ 53
+.db 2 \.dl a6502_inst_cld, a6502_getInstruction ;ISC_CLD  .equ 54
+.db 2 \.dl a6502_inst_cli, a6502_getInstruction ;ISC_CLI  .equ 55
+.db 2 \.dl a6502_inst_clv, a6502_getInstruction ;ISC_CLV  .equ 56
+.db 2 \.dl a6502_inst_sec, a6502_getInstruction ;ISC_SEC  .equ 57
+.db 2 \.dl a6502_inst_sed, a6502_getInstruction ;ISC_SED  .equ 58
+.db 2 \.dl a6502_inst_sei, a6502_getInstruction ;ISC_SEI  .equ 59
+.db 2 \.dl a6502_inst_bcc, a6502_newfetch       ;ISC_BCC  .equ 60
+.db 2 \.dl a6502_inst_bcs, a6502_newfetch       ;ISC_BCS  .equ 61
+.db 2 \.dl a6502_inst_beq, a6502_newfetch       ;ISC_BEQ  .equ 62
+.db 2 \.dl a6502_inst_bmi, a6502_newfetch       ;ISC_BMI  .equ 63
+.db 2 \.dl a6502_inst_bne, a6502_newfetch       ;ISC_BNE  .equ 64
+.db 2 \.dl a6502_inst_bpl, a6502_newfetch       ;ISC_BPL  .equ 65
+.db 2 \.dl a6502_inst_bvc, a6502_newfetch       ;ISC_BVC  .equ 66
+.db 2 \.dl a6502_inst_bvs, a6502_newfetch       ;ISC_BVS  .equ 67
+.db 2 \.dl a6502_inst_brk, a6502_reload_then_getInstruction     ;ISC_BRK  .equ 68
+.db 2 \.dl a6502_inst_rti, a6502_reload_then_getInstruction     ;ISC_RTI  .equ 69
+.db 2 \.dl a6502_inst_rts, a6502_reload_then_getInstruction     ;ISC_RTS  .equ 70
+.db 1 \.dl a6502_getInstruction                                 ;ISC_NOP  .equ 71
+.db 1 \.dl a6502_getInstruction                                 ;ISC_NOPI .equ 72
+.db 2 \.dl a6502_inst_jsr, a6502_reload_then_getInstruction     ;ISC_JSR  .equ 73
+.db 2 \.dl a6502_inst_jmp_abs, a6502_reload_then_getInstruction ;ISC_JMPA .equ 74
+.db 2 \.dl a6502_inst_jmp_ind, a6502_reload_then_getInstruction ;ISC_JMPI .equ 75
+.db 2 \.dl a6502_jamx, a6502_reload_then_getInstruction         ;ISC_JAM  .equ 76
 .db 0
+
+a6502_special_moded_func_table:
+.dl a6502_inst_sre_bc,a6502_inst_sre_hl_seg1,a6502_inst_sre_hl_seg2 ;ISC_SRE .equ 77
+.dl a6502_inst_slo_bc,a6502_inst_slo_hl_seg1,a6502_inst_slo_hl_seg2 ;ISC_SLO .equ 78
+.dl a6502_inst_rra_bc,a6502_inst_rra_hl_seg1,a6502_inst_rra_hl_seg2 ;ISC_RRA .equ 79
+.dl a6502_inst_rla_bc,a6502_inst_rla_hl_seg1,a6502_inst_rla_hl_seg2 ;ISC_RLA .equ 80
+.dl a6502_inst_isc_bc,a6502_inst_isc_hl_seg1,a6502_inst_isc_hl_seg2 ;ISC_ISC .equ 81
+.dl a6502_inst_dcp_bc,a6502_inst_dcp_hl_seg1,a6502_inst_dcp_hl_seg2 ;ISC_DCP .equ 82
+
+
 
 a6502_adrtype_table:
 .dl 0                        ;ADRMODE_IMM     .equ 0
