@@ -1,9 +1,9 @@
 ;------------------------------------------------------------------------------
 ;DELETE THIS SEGMENT WHEN DONE TESTING. THIS IS A HEADER FOR 
 ;A STANDALONE IMPLEMENTATION OF THIS FOR COMPILING PURPOSES
-#include "defs.inc"
-.org usermem-2
-.db $EF, $7B
+;#include "defs.inc"
+;.org usermem-2
+;.db $EF, $7B
 ;------------------------------------------------------------------------------
 
 a6502_rwaccess_indtable .equ write_access_ptr
@@ -17,6 +17,7 @@ a6502_rwaccess_indtable .equ write_access_ptr
 
 a6502_module_start:
 a6502_init:
+i6502Init:
     ;It'll be at this part of the initialization where you'll be afforded the
     ;opportunity to paint certain routines red. Everyone knows red ones go
     ;faster, but our bucket of red paint is so very limited. Only about 1000
@@ -30,6 +31,10 @@ a6502_init:
     ;       autoreloc() and endautoreloc()
     ;The paint bucket's emptiness is reported at the end of main.z80 with:
     ;       reportautoreloc()
+
+    #if AUTONESTEST > 0
+        call a6502_nestest_init
+    #endif 
 
     ;Map in 2KB main RAM
     ld  hl,main_ram
@@ -66,8 +71,12 @@ a6502_init:
     ld  de,$0000FC  ;Offset to RESET vector ($FE=IRQ, $FA=NMI)
     add hl,de       ;HL now points to byte at vector.
     ld  hl,(hl)     ;Pull address from RESET vector.
+    ex  af,af'
+    or  a,1         ;Z unset, C unset, S unset.
+    ex  af,af'
     #if AUTONESTEST > 0
         ld  hl,$C000    ;NESTEST headless start
+        ld  iy,7        ;nestest starts at 7cc
     #endif
     ld.s (ix+REGPC),hl
     ; -- DEBUGGING -- ENABLE TIMER 0.
@@ -75,16 +84,25 @@ a6502_init:
     ; Core registers initialized. Jump to E:HL loading
     jp  a6502_reload_then_getInstruction
 
-
+;------------------------------
+;Reloads E:HL cache at the prior PC location. This is to
+;restart the current instruction load in the event of
+;an interrupt doing that thing.
+i6502RetryFirstLoad:
+a6502_retry_getInstruction:
+    ld.s bc,(ix+REGPC)
+    dec  bc
+    jr  +_
 ;------------------------------
 ;Reloads the E:HL cache at the current PC location, then
 ;begins executing instructions at that point.
 a6502_reload_then_getInstruction:
     ld.s bc,(ix+REGPC)
-    ld  e,c
+_:  ld  e,c
     ld  c,BASETABLE_STRIDE
     mlt bc
     ld  hl,PAGETABLE
+    add hl,bc
     ld  hl,(hl)
     ld  b,0
     ld  c,e
@@ -108,6 +126,7 @@ a6502_newfetch_pagecross:
     ld  c,BASETABLE_STRIDE
     mlt bc
     ld  hl,PAGETABLE
+    add hl,bc
     ld  hl,(hl)
     jr  a6502_newfetch_continue
 ;------------------------------
@@ -121,6 +140,7 @@ a6502_nextargfetch_pagecross:
     ld  c,BASETABLE_STRIDE
     mlt bc
     ld  hl,PAGETABLE
+    add hl,bc
     ld  hl,(hl)
     jr  a6502_nextargfetch_continue
 ;------------------------------
@@ -138,8 +158,16 @@ a6502_newfetch:
 a6502_newfetch_continue:
 a6502_getInstruction:
     #if AUTONESTEST > 0
+        ld  a,(hl)
         ld  (ix+REGPC+0),e
         exx
+        #if NESTEST_BRKPT > 0
+            ld  de,(ix+REGPC)
+            ld  hl,NESTEST_BRKPT
+            or  a,a
+            sbc.s hl,de
+            jr  z,$
+        #endif
         ld  hl,(ix+CORE_STACK_BASE)
         ld  sp,hl
         call a6502_nestest_verify
@@ -153,6 +181,7 @@ a6502_getInstruction:
 a6502_nextargfetch_continue:
     exx
     lea hl,iy+0
+i6502_interrupt_timer   .equ $+1
 a6502_int_timer         .equ $+1
     ld  bc,-27939
     add hl,bc
@@ -160,6 +189,7 @@ a6502_int_timer         .equ $+1
 a6502_int_cancel_take:
     ld  L,a
     ld  h,BASETABLE_STRIDE
+    mlt hl
     ld  sp,CALLTABLE
     add hl,sp
     ld  sp,hl
@@ -187,22 +217,22 @@ a6502_int_take:
 ;to native anyway.
 ;This table can also be used during the PLP and RTI instructions to move some
 ;registers back into native.
-;Src: [12-- --34]  => [13-- -2-4]
+;Src: [AB-- --CD]  => [AC-- -B-D]
 a6502_flags6502ToNativeLUTGen:
     ld  hl,flags6502toNativeLUT
-_:  ld  a,L
-    rlca
-    rlca
-    rlca
-    rlca   
-    ld  b,a     ;bit 2 moved into position.
-    rlca        ;bit 3 moved into position
-    xor a,b
-    and a,%11111011 ;Eh. Just trust me on this one. we have src 2 and 3 in place
-    xor a,b
+_:  ld  a,L     ;A and D can stay where they are. Concerned with B and C
+    rrca        ;[DAB- ---C]
+    rrca        ;[CDAB ----]
+    rrca        ;[-CDA B---]
+    ld  b,a     ;C moved into position
+    rrca        ;[--CD AB--] B moved into position
+    xor a,b     ;Merge position C into byte containing position B
+    and a,%10111111
+    xor a,b     ;[-C-- -B--]
+    xor a,L     ;Merge AD into byte BA
+    and a,%01111110
     xor a,L
-    and a,%01111110 ;src 1 and 4 hasn't moved, so put them in place.
-    xor a,L
+    and a,%11000101 ;Removing gabage bits.
     ld  (hl),a      ;z80 maskout value %00111010 with LUT not-A operand on xor.
     inc L
     jr  nz,-_
@@ -222,11 +252,16 @@ _:  ld  a,L
     xor a,L ;All the other bits can stay where they are.
     and a,%00000010
     xor a,L
+    and a,%10000011 ;remove unused bits.
     ld  (hl),a
     inc L
     jr  nz,-_
     ret
 
+a6502_macc: .db 0
+a6502_adrm: .db 0
+a6502_isc: .db 0
+a6502_bcc: .db 0
 
 ;Detroys IY and IX. Be sure to reset IX to core_memory_ix. IY ought not be
 ;initialized to any persistent value at this point. You're not trying to
@@ -236,6 +271,9 @@ a6502_build_calltable:
     ld  ix,a6502_main_table
 a6502_build_calltable_mainLoop:
     push bc
+        ;ld  a,b
+        ;cp  a,$86
+        ;jr  z,$
         ld  c,BASETABLE_STRIDE
         mlt bc
         ld  hl,CALLTABLE
@@ -243,37 +281,48 @@ a6502_build_calltable_mainLoop:
         push hl
         pop iy          ;iy = start of this instruction's calltable entry
         ;Retrieve and store clock cycle count for that instruction
-        ld  a,(ix+1)    ;CC count. let bits CBA be bits 210 of 3-bit number
-        rrca            ;bit C in bit 0 position. Move to carry
-        ld  a,(ix+0)    ;Bits BA are in bits 7 and 6 respectively
-        rla             ;C into b0, B into carry, A into 7
-        rla             ;C into b1, B into b0, A into carry
-        rla             ;C into b2, B into b1, A into b0
-        and a,3         ;remove unused bits
-        add a,2         ;add back in counts removed. Carry is cleared by now.
-        sbc hl,hl       ;clear out HL for incoming BPUSH
-        ld  L,a         ;CC count now in HL
-        ld  (iy+0),hl   ;CC count now first entry into table
-        lea iy,iy+3     ;advance
-        ;Retrieve instruction ID and branch based on which table it uses
-        ld  a,(ix+1)    ;In format %IIIIIII-
+        ld  c,(ix+0)
+        ld  b,(ix+1)
+        ld  a,c
+        and a,3
+        ld  (a6502_macc),a
+        ld  a,c
         rrca
-        and a,%01111111 ;Have entry
-        cp  a,ISC_NONSPECIAL_LASTENTRY
+        rrca        ;00XXXX00 -> 0000XXXX
+        and a,15
+        ld  (a6502_adrm),a
+        ld  a,b
+        rra         ;0000000X -> C:X
+        ld  a,c
+        rla
+        rla
+        rla         ;X:000000XX -> 00000XXX
+        and a,7
+        add a,2
+        ld  (a6502_bcc),a
+        sbc hl,hl
+        ld  L,a
+        ld  (iy+0),hl
+        lea iy,iy+3     ;advance
+        ld  a,b
+        rrca
+        and a,127
+        ld  (a6502_isc),a
+        ;Retrieve instruction ID and branch based on which table it uses
+        ;NOTE: Instruction ID already fetched. Process what we have.
+        cp  a,ISC_NONSPECIAL_LASTENTRY+1
         jp  nc,a6502_build_calltable_skipNonspecialHandle
         ;Build table as normal here.
         ;Address mode ADRMODE_SPEC is illegal in this context.
 
         ;BPUSH ADRMODE
-        ld  a,(ix+0)    ;obtain address mode
-        rlca
-        rlca
-        and a,%00001111
+        ld  a,(a6502_adrm)
+        or  a,a
         jp  z,a6502_build_calltable_normalModeImm
-        ld  hl,a6502_adrtype_table
         ld  c,a
         ld  b,3
         mlt bc
+        ld  hl,a6502_adrtype_table
         add hl,bc
         ld  bc,(hl)
         ld  (iy+0),bc
@@ -281,8 +330,8 @@ a6502_build_calltable_mainLoop:
         ;BPUSH READ_MEMORY_ACCESS_IF_APPLICABLE
         ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
         ;Table pointers: write,read,rmw
-        ld  a,(ix+0)
-        and a,3     ;obtain memory mode
+        ld  a,(a6502_macc)
+        or  a,a
         ;We may only push either READ OR READWRITE here.
         ;If NONE or WRITE specified, we do not do anything here.
         tst a,%00000010 ;z if none or write.
@@ -296,30 +345,26 @@ a6502_build_calltable_mainLoop:
         ld  (iy+0),hl
         lea iy,iy+3
 _:      ;BPUSH INSFUNC
-        ld  a,(ix+1)    ;In format %IIIIIII-
-        rrca
-        and a,%01111111 ;Instruction ID
+        ld  a,(a6502_isc)
         ld  c,a
         ld  b,6
         mlt bc
         ld  hl,a6502_norm_func_table
         add hl,bc
-        ld  a,(ix+0)    ;obtain address mode
-        rlca
-        rlca
-        and a,%00001111
+        ld  a,(a6502_adrm)
         cp  a,ADRMODE_ABS
         jr  c,+_    ;if not abs or greater, use first entry, else entryHL
         ld  bc,3
         add hl,bc
 _:      ld  hl,(hl)
+        or a,a \ ld  c,0 \ sbc hl,bc \ jr z,$    ;LOCK IF TRYING TO USE ILLEGAL MODE
         ld  (iy+0),hl
         lea iy,iy+3
         ;BPUSH WRITE_MEMORY_ACCESS_IF_APPLICABLE
         ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
         ;Table pointers: write,read,rmw
-        ld  a,(ix+0)
-        and a,3     ;obtain memory mode
+        ld  a,(a6502_macc)
+        ld  c,a
         tst a,%00000001 ;z if none or read
         ;We may only push WRITE here. Skip if value here is 0 or 2.
         ;If NONE or WRITE specified, we do not do anything here.
@@ -330,8 +375,8 @@ _:      ld  hl,(hl)
 _:      ;BPUSH RETURNADDRESS
         ;a6502_newfetch_exx if memmode else a6502_newfetch
         ld  hl,a6502_newfetch_exx
-        ld  a,(ix+0)
-        and a,3
+        inc c
+        dec c
         jr  nz,+_
         ld  hl,a6502_newfetch
 _:      ld  (iy+0),hl
@@ -339,9 +384,7 @@ _:      ld  (iy+0),hl
 a6502_build_calltable_normalModeImm:
         ;Abbreviated normal mode for instructions that support operand IMM.
         ;BPUSH INSFUNC
-        ld  a,(ix+1)    ;In format %IIIIIII-
-        rrca
-        and a,%01111111 ;Instruction ID
+        ld  a,(a6502_isc)
         ld  c,a
         ld  b,6
         mlt bc
@@ -354,10 +397,10 @@ a6502_build_calltable_normalModeImm:
         ld  (iy+3),hl
         jp  a6502_build_calltable_collectAfter
 a6502_build_calltable_skipNonspecialHandle:
-        cp  a,ISC_SPECIAL_NONMODED_LASTENTRY
+        cp  a,ISC_SPECIAL_NONMODED_LASTENTRY+1
         jr  nc,a6502_build_calltable_skipSpecialHandle
         ;Build table based on specialness.
-        sub a,ISC_NONSPECIAL_LASTENTRY
+        sub a,ISC_NONSPECIAL_LASTENTRY+1
         ld  hl,a6502_special_specific_case_func_table
         jr  z,++_
         ld  b,a
@@ -381,21 +424,19 @@ _:      ld  a,(hl)
         ldir
         jp  a6502_build_calltable_collectAfter
 a6502_build_calltable_skipSpecialHandle:
-        sub a,ISC_SPECIAL_NONMODED_LASTENTRY
+        sub a,ISC_SPECIAL_NONMODED_LASTENTRY+1
         ;Build table based on normal table above, except the jump table has
         ;an extra entry for split function before and after WRITE_ACCESS,
         ;if the address mode specifies such accesses.
         ;Address mode ADRMODE_SPEC is illegal in this context.
         ;BPUSH ADRMODE
-        ld  a,(ix+0)    ;obtain address mode
-        rlca
-        rlca
-        and a,%00001111
-        jp  z,$     ;IMM NOT ALLOWED ON SPECIALMODED INSTRUCTIONS
-        ld  hl,a6502_adrtype_table
+        ld  a,(a6502_adrm)
+        or  a,a
+        jp  z,$     ;THESE INSTRUCTIONS CANNOT TAKE IMM. HALT FOR DEBUG
         ld  c,a
         ld  b,3
         mlt bc
+        ld  hl,a6502_adrtype_table
         add hl,bc
         ld  bc,(hl)
         ld  (iy+0),bc
@@ -403,8 +444,8 @@ a6502_build_calltable_skipSpecialHandle:
         ;BPUSH READ_MEMORY_ACCESS_IF_APPLICABLE
         ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
         ;Table pointers: write,read,rmw
-        ld  a,(ix+0)
-        and a,3     ;obtain memory mode
+        ld  a,(a6502_macc)
+        or  a,a
         ;We may only push either READ OR READWRITE here.
         ;If NONE or WRITE specified, we do not do anything here.
         tst a,%00000010 ;z if none or write.
@@ -418,39 +459,33 @@ a6502_build_calltable_skipSpecialHandle:
         ld  (iy+0),hl
         lea iy,iy+3
 _:      ;BPUSH INSFUNC
-        ld  a,(ix+1)    ;In format %IIIIIII-
-        rrca
-        and a,%01111111 ;Instruction ID
+        ld  a,(a6502_isc)
         ld  c,a
         ld  b,9
         mlt bc
         ld  hl,a6502_special_moded_func_table
         add hl,bc
-        ld  a,(ix+0)    ;obtain address mode
-        rlca
-        rlca
-        and a,%00001111
+        ld  a,(a6502_adrm)
         cp  a,ADRMODE_ABS
         jr  c,+_    ;if not abs or greater, use first entry, else entryHL
         ld  bc,3
         add hl,bc
 _:      ld  hl,(hl)
+        or a,a \ ld  c,0 \ sbc hl,bc \ jr z,$    ;LOCK IF TRYING TO USE ILLEGAL MODE
         ld  (iy+0),hl
         lea iy,iy+3
         ;BPUSH WRITE_MEMORY_ACCESS_IF_APPLICABLE
         ;read values: NONE, WRITE, READ, READWRITE (0,1,2,3)
         ;Table pointers: write,read,rmw
-        ld  a,(ix+0)
-        and a,3     ;obtain memory mode
+        ld  a,(a6502_macc)
+        ld  c,a
         tst a,%00000001 ;z if none or read
         ;We may only push WRITE here. Skip if value here is 0 or 2.
         ;If NONE or WRITE specified, we do not do anything here.
         jr  z,+_
         ld  hl,(a6502_rwaccess_indtable)    ;write-access
         ld  (iy+0),hl
-        ld  a,(ix+1)    ;If we wrote a WRITEACC, must put seg2 afterward.
-        rrca
-        and a,%01111111 ;Instruction ID
+        ld  a,(a6502_isc)    ;If we wrote a WRITEACC, must put seg2 afterward.
         ld  c,a
         ld  b,9
         mlt bc
@@ -462,13 +497,14 @@ _:      ld  hl,(hl)
 _:      ;BPUSH RETURNADDRESS
         ;a6502_newfetch_exx if memmode else a6502_newfetch
         ld  hl,a6502_newfetch_exx
-        ld  a,(ix+0)
-        and a,3
+        inc c
+        dec c
         jr  nz,+_
         ld  hl,a6502_newfetch
 _:      ld  (iy+0),hl
 a6502_build_calltable_collectAfter:
     pop bc
+    lea ix,ix+2
     inc b
     jp  nz,a6502_build_calltable_mainLoop
     ret
@@ -549,8 +585,8 @@ a6502_adrmode_read_abs:
     ld  c,BASETABLE_STRIDE
     mlt bc
     ld  hl,PAGETABLE
-    ld  hl,(hl)
     add hl,bc
+    ld  hl,(hl)
 _:  exx
     ld  e,a         ;LSB
     exx
@@ -916,50 +952,58 @@ _:  ex  af,af'
     ld  a,(hl)
 a6502_inst_and_bc:
 a6502_inst_and_hl:
-    ld  b,a
+    ld  c,a
     ex  af,af'
-    adc a,a
-    ld  c,a     ;preserve carry flag
-    ld  a,(ix+REGA)
+    ld  a,c
+    ld  b,(ix+REGA)
+    jr  nc,+_
     and a,b
     ld  (ix+REGA),a
-    bit 0,c
-    jr  z,+_
     scf
-_:  ex  af,af'
+    ex  af,af'
+    ret
+_:  and a,b
+    ld  (ix+REGA),a
+    ex  af,af'
     ret
 ;------------------------------------------
     ld  a,(hl)
 a6502_inst_eor_bc:
 a6502_inst_eor_hl:
-    ld  b,a
+    ld  c,a
     ex  af,af'
-    adc a,a
-    ld  c,a     ;preserve carry flag
-    ld  a,(ix+REGA)
+    ld  a,c
+    ld  b,(ix+REGA)
+    jr  nc,+_
     xor a,b
     ld  (ix+REGA),a
-    bit 0,c
-    jr  z,+_
     scf
-_:  ex  af,af'
+    ex  af,af'
     ret
+_:  xor a,b
+    ld  (ix+REGA),a
+    ex  af,af'
+    ret
+
 ;------------------------------------------
     ld  a,(hl)
 a6502_inst_or_bc:
 a6502_inst_or_hl:
-    ld  b,a
+    ld  c,a
     ex  af,af'
-    adc a,a
-    ld  c,a     ;preserve carry flag
-    ld  a,(ix+REGA)
+    ld  a,c
+    ld  b,(ix+REGA)
+    jr  nc,+_
     or  a,b
     ld  (ix+REGA),a
-    bit 0,c
-    jr  z,+_
     scf
-_:  ex  af,af'
+    ex  af,af'
     ret
+_:  or  a,b
+    ld  (ix+REGA),a
+    ex  af,af'
+    ret
+
 ;------------------------------------------
 a6502_inst_asl_bc:
     ld  d,a
@@ -1031,9 +1075,9 @@ a6502_inst_cmp_hl:
     ld  b,a
     ex  af,af'
     ld  a,(ix+REGA)
-    sub a,b
+    cp  a,b
     ccf
-_:  ex  af,af'
+    ex  af,af'
     ret
 ;------------------------------------------
     ld  a,(hl)
@@ -1042,9 +1086,9 @@ a6502_inst_cpx_hl:
     ld  b,a
     ex  af,af'
     ld  a,(ix+REGX)
-    sub a,b
+    cp  a,b
     ccf
-_:  ex  af,af'
+    ex  af,af'
     ret
 ;------------------------------------------
     ld  a,(hl)
@@ -1053,28 +1097,28 @@ a6502_inst_cpy_hl:
     ld  b,a
     ex  af,af'
     ld  a,(ix+REGY)
-    sub a,b
+    cp  a,b
     ccf
-_:  ex  af,af'
+    ex  af,af'
     ret
 ;------------------------------------------
 a6502_inst_bit_bc:  ;Only zp uses this.
 a6502_inst_bit_hl:  ;Only abs uses this.
-    ld  c,a
-    and a,(ix+REGA)
-    ld  a,c
+    ld  c,a         ;Save operand for bits 6 and 7
+    and a,(ix+REGA) ;AND with A, discard actual result other than if zero
+    ld  a,c         ;Restore operand
     res SF_ZERO,a
     jr  nz,+_
-    set SF_ZERO,a
+    set SF_ZERO,a   ;And manually set zero flag in the operand.
 _:  ld  bc,flags6502toNativeLUT
-    ld  c,a         ;NZ-V bits now in-place. Gotta shuffle C in too. Pull native
-    ld  a,(bc)
-    rrca        ;preshift right to accept carry on next lshift.
-    ld  c,a
-    ex  af,af'
-    rl c
+    ld  c,a         ;Non-native bits in-place. Carry bit may or may not be set.
+    ld  a,(bc)      ;Get native flags.
+    rrca            ;[-SZ-H-PN]
+    ld  c,a         ;save flag rotated to receive carry
+    ex  af,af'      
+    rl c            ;[SZ-H-PNC]
     push.s bc
-    pop.s af    ;flags reestablished.
+    pop.s af        ;flags reestablished.
     res SF_OVER,(ix+REGSR)
     jp  po,+_
     set SF_OVER,(ix+REGSR)
@@ -1432,13 +1476,14 @@ a6502_inst_php: ;Verify that the flags pushed are accurate.
     xor a,c
     and a,%10000011
     xor a,c
-    or  a,%00110000
+    or  a,%00110000     ;Push value with BRK and b5 set.
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
     ld  (bc),a
     dec c
     ld  (ix+REGSP),c
     ret
+
 a6502_inst_pla:
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
@@ -1452,6 +1497,7 @@ a6502_inst_pla:
     dec b
     ex  af,af'
     ret
+
 a6502_inst_plp:     ;Verify that flag reconstruct to native is valid.
     ld  bc,STACKBASE
     ld  c,(ix+REGSP)
@@ -1461,7 +1507,7 @@ a6502_inst_plp:     ;Verify that flag reconstruct to native is valid.
     ld  b,(ix+REGSR)
     xor a,b
     and a,%11001111
-    xor a,b
+    xor a,b         ;BRK and b5 ignored when pulling
     ld  (ix+REGSR),a
     ld  bc,flags6502toNativeLUT
     ld  c,a
@@ -1472,6 +1518,7 @@ a6502_inst_plp:     ;Verify that flag reconstruct to native is valid.
     pop.s af
     ex  af,af'
     ret
+
 a6502_inst_dex:
     ex  af,af'
     dec (ix+REGX)
@@ -1570,6 +1617,7 @@ _:  ;Either way, recalculate HL since we lost that calculating new 6502:PC
     mlt bc
     ld  hl,PAGETABLE
     add hl,bc
+    ld  hl,(hl)
     ld  b,0
     ld  c,e
     add hl,bc   ;New address to begin fetching with.
@@ -1602,7 +1650,7 @@ a6502_inst_bne:
     ret
 a6502_inst_bpl:
     ex  af,af'
-    jr  nz,a6502_isub_branch
+    jp  p,a6502_isub_branch
     ex  af,af'
     ret
 a6502_inst_bvc:
@@ -1615,6 +1663,7 @@ a6502_inst_bvs:
     jr  a6502_isub_branch_no_ex
 
 a6502_inst_brk_from_handler:
+inst6502_brk_from_handler:
     ADDCYC(7)
     ld.s de,(ix+REGPC)
     dec de
@@ -1775,8 +1824,8 @@ _:  ld  b,(hl)
     dec L
     ld  (hl),e
     dec L
-    ld  (ix+REGSP),l
-    ld.s (ix+REGSP),bc
+    ld  (ix+REGSP),L
+    ld.s (ix+REGPC),bc
     ret
 
 ;Full HL:E reload

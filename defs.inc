@@ -9,7 +9,8 @@
 ;Rebuild with this set to 1 in order to perform a headless test,
 ;printing either a success message, or a list of instructions leading
 ;up to failure againt a logfile of a predetermined name.
-#define AUTONESTEST 0
+#define AUTONESTEST 1
+#define NESTEST_BRKPT $0
 
 ;Undefine this to speed up core process by losing debug state
 ;#define COREDEBUG
@@ -51,7 +52,7 @@ EVENT_STACK_L       .equ $D10000
 EVENT_STACK_S       .equ EVENT_STACK_L & $00FFFF
 
 BASETABLE           .equ $D08000        ;variable size. 256*BASETABLE_STRIDE
-BASETABLE_STRIDE    .equ 12
+BASETABLE_STRIDE    .equ 32
 PAGETABLE_OFFSET    .equ 0
 PAGETABLE           .equ BASETABLE+PAGETABLE_OFFSET
 JUMPTABLE_OFFSET    .equ 4

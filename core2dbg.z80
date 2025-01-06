@@ -1,0 +1,307 @@
+; Only #include this file if AUTONESTEST is not zero.
+; Upon test failure, return screen to regular mode
+; and print debugging information.
+
+; Only two things are called here. One to init, and one to advance the
+; nestest checker that's called from core.
+
+#if AUTONESTEST > 0
+
+a6502_nestest_init:
+    ld  hl,a6502_nestest_timings_file
+    call _Mov9ToOP1
+    call _ChkFindSym
+    jr  c,$     ;did you really start a test with no test file?
+    call _ChkInRam
+    ex  de,hl
+    ld  de,9    ;clears DEU in case.
+    jr  z,+_
+    add hl,de
+    ld  e,(hl)
+    add hl,de
+    inc hl
+_:  ld  e,(hl)
+    inc hl
+    ld  d,(hl)
+    inc hl
+    ld  (a6502_nestest_tester_curaddress),hl
+    add hl,de
+    ld  (a6502_nestest_tester_endaddress),hl
+    xor a,a
+    ld  (a6502_state_table_line_number),a
+    ld  hl,a6502_cpu_state_buffer
+    push hl
+    pop de
+    inc de
+    ld  (hl),$FF
+    ld  bc,(32*10)-1
+    ldir
+    ret
+
+
+a6502_nestest_tester_curaddress:
+.dl 0
+a6502_nestest_tester_endaddress:
+.dl 0
+a6502_state_table_line_number:
+.db 0   ;31 lines of figures. linewidth 10 statebytes
+;statebytes fmt per line: clockcycles (2), Copy 8 bytes at IX+REGA
+;An empty line is anything at address $FFFF
+a6502_cpu_state_buffer:
+.dw 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0    ;00-05
+.dw 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0    ;06-11
+.dw 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0    ;12-17
+.dw 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0    ;18-23
+.dw 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0    ;24-29
+.dw 0,0,0,0,0 ,0,0,0,0,0    ;30,31
+
+
+
+;Retrieve data from CPU core, then check against NESTEST log file.
+;We assume entry point is "normal registers". Thus, most of our input
+;will be in the shadow registers.
+;Input: E':LOWPAGE, HL':Current instruction ptr. A=current instruction byte
+;       IY=Clock count prior to executing current instruction
+a6502_nestest_verify:
+    ; Flags are still a mess. Extract them and merge into 6502 flags
+    ; There's no harm in doing this. It just make things slower.
+    ld  (ix+7),a    ;hmm.
+    ld  hl,flagsZ80to6502LUT
+    ex  af,af'
+    push af
+    pop bc
+    ex  af,af'
+    ld  L,c
+    ld  a,(hl)
+    ld  c,(ix+REGSR)
+    xor a,c
+    and a,%10000011
+    xor a,c
+    ld  (ix+REGSR),a
+    ; Write current state into state buffer
+    ld  hl,a6502_state_table_line_number
+    ld  a,(hl)
+    cp  a,28
+    jr  nc,+_       ;if outside range, do not increment HL
+    inc (hl)
+    jr ++_
+_:  push hl ;instead, move table downward.
+        ld  de,a6502_cpu_state_buffer
+        ld  hl,a6502_cpu_state_buffer+10
+        ld  bc,29*10
+        ldir
+    pop hl
+_:  inc hl
+    ld  c,a
+    ld  b,10
+    mlt bc
+    add hl,bc
+    push iy
+    pop bc
+    ld  (hl),c
+    inc hl
+    ld  (hl),b
+    inc hl
+    ex de,hl
+    push ix
+    pop hl
+    ld  bc,8
+    ldir
+    ; Did we run out of things to test?
+    ld  de,(a6502_nestest_tester_curaddress)
+    ld  hl,(a6502_nestest_tester_endaddress)
+    or  a,a
+    sbc hl,de
+    jr  z,a6502_nestest_verify_endtest
+    jr  c,a6502_nestest_verify_endtest
+    ex  de,hl
+    ; Does current state match current position on tester?
+    ;file format: for each sample, .db timelsb,timemsb,flags
+    ld  c,(hl)
+    inc hl
+    ld  b,(hl)
+    inc hl
+    ld  a,(hl)
+    inc hl
+    ld  (a6502_nestest_tester_curaddress),hl
+    push iy
+    pop hl
+    or  a,a
+    sbc hl,bc
+    jr  nz,a6502_nestest_verify_timing_failed
+    cp  a,(ix+REGSR)
+    jr  nz,a6502_nestest_verify_flags_failed
+    ret
+
+
+a6502_nestest_verify_endtest:
+    ld  hl,a6502_nestest_string_completed
+    jr  a6502_nestest_ending_collect
+a6502_nestest_verify_timing_failed:
+    ld  hl,a6502_nestest_string_timing_failed
+    jr  a6502_nestest_ending_collect
+a6502_nestest_verify_flags_failed:
+    ld  hl,a6502_nestest_string_flags_failed
+    jr  a6502_nestest_ending_collect
+
+a6502_nestest_ending_collect:
+    push hl
+        call setFullScreenMode
+        scf
+        sbc hl,hl
+        ld  (mpLcdPalette+253),hl
+        inc hl
+        ld  (mpLcdPalette+0),hl
+        call newPage
+        ld  hl,a6502_cpu_state_buffer
+        ld  b,29
+_:      push bc
+            push hl
+                call a6502_debug_printout
+                call newLine
+            pop hl
+            ld  bc,10
+            add hl,bc
+        pop bc
+        djnz -_
+    pop hl
+    call printString
+    call fastCopy
+    call waituntilnewkeypress
+    call waituntilkeyrelease
+    jp   programExit
+    ret
+
+a6502_debug_printout:
+    push ix
+;statebytes fmt per line: clockcycles (2), Copy 8 bytes at IX+REGA
+        push hl
+        pop ix
+        lea ix,ix+2     ;bring IX up to listed offsets. -2 is CC count.
+        ;Check if not supposed to print
+        ld  hl,(ix-2)
+        ld  bc,$FFFF
+        sbc.s hl,bc
+        jp z,a6502_debug_printout_noprint
+        ;Print address
+        ld  a,(ix+REGPC+1)
+        call a6502_print_numpair
+        ld  a,(ix+REGPC+0)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print register A
+        ld  a,'A'
+        call a6502_print_chr
+        ld  a,(ix+REGA)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print register X
+        ld  a,'X'
+        call a6502_print_chr
+        ld  a,(ix+REGX)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print register Y
+        ld  a,'Y'
+        call a6502_print_chr
+        ld  a,(ix+REGY)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print register SP [S]
+        ld  a,'S'
+        call a6502_print_chr
+        ld  a,(ix+REGSP)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print register SR [P]
+        ld  a,'P'
+        call a6502_print_chr
+        ld  a,(ix+REGSR)
+        call a6502_print_numpair
+        ld  a,' '
+        call a6502_print_chr
+        ;Print CPU timing
+        ld  a,(ix-1)
+        call a6502_print_numpair
+        ld  a,(ix-2)
+        call a6502_print_numpair
+        ;Print partial instruction
+        ld  hl,inst6502_disassembly_table
+        ld  c,(ix+7)
+        ld  b,4
+        mlt bc
+        add hl,bc
+        ld b,3
+_:      push bc
+            ld  a,(hl)
+            inc hl
+            call a6502_print_chr
+        pop bc
+        djnz -_
+        ld  a,' '
+        call a6502_print_chr
+        ld  c,(hl)
+        ld  b,6
+        mlt bc
+        ld  hl,a6502_addressmode
+        add hl,bc
+        ld b,6
+_:      push bc
+            ld  a,(hl)
+            inc hl
+            call a6502_print_chr
+        pop bc
+        djnz -_
+a6502_debug_printout_noprint:
+    pop ix
+    ret
+
+a6502_print_chr:
+    push hl
+        push de
+            call printBigFont
+        pop de
+    pop hl
+    ret
+a6502_print_numpair:
+    push hl
+        push de
+            call printSmallNumPair
+        pop de
+    pop hl
+    ret
+
+a6502_addressmode:
+.db "      "    ;.db 1,""  ;
+.db "<ZPX> "    ;.db 4,"1,X"  ;
+.db "<IND> "    ;.db 4,"(2)"  ;
+.db "<ABS> "    ;.db 2,"2"  ;
+.db "<ABSX>"    ;.db 4,"2,X"  ;
+.db "<XIND>"    ;.db 6,"(1,X)"  ;
+.db "<ACC> "    ;.db 2,"A"  ;
+.db "<ZP>  "    ;.db 2,"1"  ;
+.db "<REL> "    ;.db 2,"-"  ;
+.db "<IMM> "    ;.db 3,"#1"  ;
+.db "      "    ;.db 1,""  ;IMPLIED
+.db "<INDY>"    ;.db 6,"(1),Y"  ;
+.db "<ABSY>"    ;.db 4,"2,Y"  ;
+.db "<ZPY> "    ;.db 4,"1,Y"  ;
+
+
+a6502_nestest_timings_file:
+.db AppVarObj,"timings",0
+
+a6502_nestest_string_completed:
+.db "Test completed.",0
+a6502_nestest_string_timing_failed:
+.db "CPU Timing mismatch detected.",0
+a6502_nestest_string_flags_failed:
+.db "CPU Flags mismatch detected.",0
+
+
+#endif
