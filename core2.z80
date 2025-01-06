@@ -337,8 +337,10 @@ a6502_build_calltable_mainLoop:
         tst a,%00000010 ;z if none or write.
         jr  z,+_
         dec a
+        and a,3
         ld  c,a
         ld  b,3
+        mlt bc
         ld  hl,a6502_rwaccess_indtable
         add hl,bc
         ld  hl,(hl)
@@ -451,8 +453,10 @@ a6502_build_calltable_skipSpecialHandle:
         tst a,%00000010 ;z if none or write.
         jr  z,+_
         dec a
+        and a,3
         ld  c,a
         ld  b,3
+        mlt bc
         ld  hl,a6502_rwaccess_indtable
         add hl,bc
         ld  hl,(hl)
@@ -1410,6 +1414,10 @@ _:  xor a,0
 ; * The generalisation is either inefficient, or would make a giant mess to
 ;   try to clean up.
 ;       (e.g.) basically all branch and branch-adjacent instructions
+; * In the future, you may opt to move certain instructions from normal to
+;   special to provide finer-grained control over the return queue, at the cost
+;   of having to manually reimplement the changes if the tables ever need to
+;   be regenerated via `test.ipynb`
 a6502_inst_tax: ;NZ 1b 2cc A->X
     ld  b,(ix+REGA)
     ld  (ix+REGX),b

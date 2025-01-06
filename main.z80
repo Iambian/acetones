@@ -780,7 +780,7 @@ mapper_table:   ;entries 9 wide
 .dl mapper0_init
 .dl mapper0_write
 .dl mapper0_read
-.dl mapper0_write   ;replace with RMW
+.dl mapper0_read   ;replace with read-write later
 
 mapper0_init:
     ;map trainer, if exist
@@ -915,17 +915,13 @@ mapper0_ppu_read_ppustatus:
     ret
 mapper0_ppu_read_ppudata:
     ld  a,(ix+PPU_V+1)
-    ld  c,a
     and a,%00111111
+    ld  b,a
     cp  a,$20
     jr  nc,+_   ;skip reading from CHR_ROM
-    push de
-        ex.s de,hl  ;clears DEU
-        ld  hl,(chr_rom_curbank)
-        ld  d,a
-        ld  e,(ix+PPU_V+0)
-        add hl,de
-    pop de
+    ld  hl,(chr_rom_curbank)
+    ld  c,(ix+PPU_V+0)
+    add.s hl,bc
     ld  a,(ix+PPU_DATA) ;following dance simulates delayed buffer read
     ld  b,(hl)
     ld  (ix+PPU_DATA),b
@@ -1039,20 +1035,17 @@ mapper0_apu_stop_keyboard:
     ret
 _:  cp  a,APU_OAMDMA_ADR
     jr  nz,+_
-    push bc
-        push de
-            ld  de,513  ;or 514. Not going to emulate put/get cycles
-            add iy,de
-            ld  c,BASETABLE_STRIDE
-            mlt bc
-            ld  hl,PAGETABLE
-            add hl,bc
-            ld  hl,(hl)
-            ld  de,OBJECT_ATTRIB_MEM
-            ld  bc,256
-            ldir
-        pop de
-    pop bc
+    ld  a,b
+    ld  c,BASETABLE_STRIDE
+    mlt bc
+    ld  hl,PAGETABLE
+    add hl,bc
+    ld  hl,(hl)
+    ld  de,OBJECT_ATTRIB_MEM
+    ld  bc,256
+    ldir
+    ld  bc,513
+    add iy,bc
     ret
 _:  ld  (hl),b
 mapper0_ppu_smc_return:
