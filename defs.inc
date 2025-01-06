@@ -10,7 +10,7 @@
 ;printing either a success message, or a list of instructions leading
 ;up to failure againt a logfile of a predetermined name.
 #define AUTONESTEST 1
-#define NESTEST_BRKPT $E92E
+#define NESTEST_BRKPT $0
 #define AUTONESTEST_SHOW 0
 
 ;Undefine this to speed up core process by losing debug state

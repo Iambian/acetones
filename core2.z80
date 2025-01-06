@@ -272,9 +272,10 @@ a6502_build_calltable:
     ld  ix,a6502_main_table
 a6502_build_calltable_mainLoop:
     push bc
-        ld  a,b
-        cp  a,$C3
-        jr  z,$
+        ;ld  a,b
+        ;cp  a,$C3
+        ;.error "YOU MUST FIX TABLEGEN FOR DCP (AND POSSIBLY OTHERS)"
+        ;jr  z,$
         ld  c,BASETABLE_STRIDE
         mlt bc
         ld  hl,CALLTABLE
@@ -465,6 +466,7 @@ a6502_build_calltable_skipSpecialHandle:
         lea iy,iy+3
 _:      ;BPUSH INSFUNC
         ld  a,(a6502_isc)
+        sub a,ISC_SPECIAL_NONMODED_LASTENTRY+1
         ld  c,a
         ld  b,9
         mlt bc
@@ -491,6 +493,7 @@ _:      ld  hl,(hl)
         ld  hl,(a6502_rwaccess_indtable)    ;write-access
         ld  (iy+0),hl
         ld  a,(a6502_isc)    ;If we wrote a WRITEACC, must put seg2 afterward.
+        sub a,ISC_SPECIAL_NONMODED_LASTENTRY+1
         ld  c,a
         ld  b,9
         mlt bc
@@ -502,8 +505,8 @@ _:      ld  hl,(hl)
 _:      ;BPUSH RETURNADDRESS
         ;a6502_newfetch_exx if memmode else a6502_newfetch
         ld  hl,a6502_newfetch_exx
-        inc c
-        dec c
+        ld  a,(a6502_macc)
+        or  a,a
         jr  nz,+_
         ld  hl,a6502_newfetch
 _:      ld  (iy+0),hl
@@ -1162,13 +1165,14 @@ a6502_inst_dcp_bc:
 a6502_inst_dcp_hl_seg1: ;Placed after initial R/RMW access as normal.
     dec a
     ld  b,a
-    ld  (+_++1),a
+    ld  (+_+1),a
     ret
 
 a6502_inst_dcp_hl_seg2: ;Placed after the W access
     ex  af,af'
     ld  a,(ix+REGA)
 _:  cp  a,0     ;SMC'd for second segment.
+    ccf
     ex  af,af'
     ret
 
@@ -1192,13 +1196,14 @@ _:  ex  af,af'
 ;NOTE: a6502_inst_isc_hl also has special considerations,
 ;        so must be special-cased during generation.
 a6502_inst_isc_hl_seg1: ;Placed after initial R/RMW access as normal.
-    dec a
+    inc a
     ld  b,a
     ld  (+_+1),a
     ret
 
 a6502_inst_isc_hl_seg2: ;Placed after the W access
     ex  af,af'
+    ld  a,(ix+REGA)
     ccf
 _:  sbc a,0
     ccf
