@@ -18,6 +18,9 @@ a6502_rwaccess_indtable .equ write_access_ptr
 a6502_module_start:
 a6502_init:
 i6502Init:
+    ;scf
+    ;sbc hl,hl
+    ;ld  (hl),2  ;opens the debugger
     ;It'll be at this part of the initialization where you'll be afforded the
     ;opportunity to paint certain routines red. Everyone knows red ones go
     ;faster, but our bucket of red paint is so very limited. Only about 1000
@@ -31,6 +34,7 @@ i6502Init:
     ;       autoreloc() and endautoreloc()
     ;The paint bucket's emptiness is reported at the end of main.z80 with:
     ;       reportautoreloc()
+    copy_autoalloc(a6502_fetcher_start, i6502RetryFirstLoad, a6502_fetcher_end-a6502_fetcher_start)
 
     #if AUTONESTEST > 0
         call a6502_nestest_init
@@ -84,6 +88,20 @@ i6502Init:
     ; Core registers initialized. Jump to E:HL loading
     jp  a6502_reload_then_getInstruction
 
+
+
+;#############################################################################
+
+;  # ###   ## ### ##  # #  ## ### #  #  ##      ### ### ### ## # # # ##   ##
+;  # #  # #    #  # # # # #    #  # # # # #     #   #    # #   # # # # # #  
+;  # #  #  ##  #  ##  # # #    #  # # # # #     ##  ##   # #   ### # # # #  
+;  # #  #    # #  # # # # #    #  # # # # #     #   #    # #   # # # # # # #
+;  # #  #  ##  #  # # ###  ##  #  #  #  # #     #   ###  #  ## # # # # # ###
+
+;#############################################################################
+
+a6502_fetcher_start:
+autoreloc()
 ;------------------------------
 ;Reloads E:HL cache at the prior PC location. This is to
 ;restart the current instruction load in the event of
@@ -184,9 +202,13 @@ a6502_nextargfetch_continue:
     lea hl,iy+0
 i6502_interrupt_timer   .equ $+1
 a6502_int_timer         .equ $+1
-    ld  bc,-27939
+    #if AUTONESTEST > 0
+        ld  bc,-26554 ;
+    #else
+        ld  bc,-27939
+    #endif
     add hl,bc
-    jr  c,a6502_int_take
+    jp  c,a6502_int_take
 a6502_int_cancel_take:
     ld  L,a
     ld  h,BASETABLE_STRIDE
@@ -199,8 +221,38 @@ a6502_int_cancel_take:
     exx
     ret
 
+endautoreloc()
+a6502_fetcher_end:
+
+;Assume there's always an interrupt in the wings.
 a6502_int_take:
-    jr  a6502_int_cancel_take
+    #if AUTONESTEST == 0
+        add hl,hl
+        jp  c,a6502_int_cancel_take
+        exx
+        ld  (ix+REGPC+0),e
+        ld  hl,flagsZ80to6502LUT
+        ex  af,af'
+        push.s af
+        pop.s bc
+        ld  l,c
+        ld  a,(hl)
+        ld  b,(ix+REGSR)
+        xor a,b
+        and a,%10000011
+        xor a,b
+        ld  (ix+REGSR),a
+        ld  hl,(ix+CORE_STACK_BASE)
+        ld  sp,hl
+        ld  hl,(INT_TABLE)
+        jp  (hl)
+    #else
+        scf
+        sbc hl,hl
+        ld  (hl),2  ;opens the debugger
+        jp  a6502_int_cancel_take
+    #endif
+
 
 ;##############################################################################
 
@@ -1688,6 +1740,14 @@ a6502_inst_bvs:
 a6502_inst_brk_from_handler:
 inst6502_brk_from_handler:
     ADDCYC(7)
+    ld  hl,a6502_flags6502ToNativeLUTGen
+    ld  L,(ix+REGSR)
+    ld  c,(hl)
+    ex  af,af'
+    push.s bc
+    pop.s af
+    ex  af,af'
+    ld  sp,CALLTABLE+(BASETABLE_STRIDE*0)+6 ;return address for BRK inst
     ld.s de,(ix+REGPC)
     dec de
     jr  +_

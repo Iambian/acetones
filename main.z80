@@ -135,7 +135,7 @@ _:      ld  a,(hl)
     xor a,a
     sbc hl,hl
     ld  (ix+0),hl
-    ld  (ix+3),a
+    ld  (ix+3),a    ;clear timer
 
     ;Initialize all (additional) state machines,
     ;then initialize/start the emulation core
@@ -149,6 +149,7 @@ _:      ld  a,(hl)
 
     call ppu_init
     call i6502Init
+    jr $
     
 
     ;===========================================================================
@@ -1038,6 +1039,7 @@ _:  cp  a,APU_OAMDMA_ADR
     ld  a,b
     ld  c,BASETABLE_STRIDE
     mlt bc
+    ld  a,e
     ld  hl,PAGETABLE
     add hl,bc
     ld  hl,(hl)
@@ -1046,6 +1048,7 @@ _:  cp  a,APU_OAMDMA_ADR
     ldir
     ld  bc,513
     add iy,bc
+    ld  e,a
     ret
 _:  ld  (hl),b
 mapper0_ppu_smc_return:

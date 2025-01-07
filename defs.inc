@@ -9,7 +9,7 @@
 ;Rebuild with this set to 1 in order to perform a headless test,
 ;printing either a success message, or a list of instructions leading
 ;up to failure againt a logfile of a predetermined name.
-#define AUTONESTEST 1
+#define AUTONESTEST 0
 #define NESTEST_BRKPT $0
 #define AUTONESTEST_SHOW 0
 
@@ -18,7 +18,7 @@
 
 DEBUG_PRINT_START_CYCLE .equ 0
 DEBUG_STEP_START_CYCLE  .equ 30000 ;26485
-DEFAULT_FRAMESKIP .equ 4
+DEFAULT_FRAMESKIP .equ 2
 
 
 FONTFGCOLOR .EQU $FF ;$29
