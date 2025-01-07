@@ -1292,7 +1292,7 @@ _:  ex  af,af'
 a6502_inst_rra_hl_seg1:
     ld  b,a
     ex  af,af'
-    rl  b
+    rr  b
     ld  a,b
     ex  af,af'
     ret
@@ -1301,6 +1301,7 @@ a6502_inst_rra_hl_seg2:
     ex  af,af'
     adc a,(ix+REGA)
     ld  (ix+REGA),a
+    res SF_OVER,(ix+REGSR)
     jp  po,+_
     set SF_OVER,(ix+REGSR)
 _:  ex  af,af'
