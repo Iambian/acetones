@@ -9,7 +9,7 @@
 ;Rebuild with this set to 1 in order to perform a headless test,
 ;printing either a success message, or a list of instructions leading
 ;up to failure againt a logfile of a predetermined name.
-#define AUTONESTEST 0
+#define AUTONESTEST 1
 #define NESTEST_BRKPT $0
 #define AUTONESTEST_SHOW 0
 
@@ -18,7 +18,7 @@
 
 DEBUG_PRINT_START_CYCLE .equ 0
 DEBUG_STEP_START_CYCLE  .equ 30000 ;26485
-DEFAULT_FRAMESKIP .equ 2
+DEFAULT_FRAMESKIP .equ 1
 
 
 FONTFGCOLOR .EQU $FF ;$29
@@ -133,7 +133,7 @@ TABLESEND           .equ INT_TABLE+(INT_TABLE_MAXLEN*INT_TABLE_STRIDE)
 ;
 flags6502toNativeLUT    .equ    saferam1+1024-256
 flagsZ80to6502LUT       .equ    flags6502toNativeLUT-256
-
+keyboardLUT             .equ    flagsZ80to6502LUT-256
 
 
 
@@ -166,13 +166,13 @@ chr_rom_2_cache     .equ chr_rom_1_cache+(256*64)   ;+$020000
 #define PPU_ADDR -26
 #define PPU_DATA -25
 ;PPU internal stuff
-#define PPU_W_RESET -20     ;Write WREG_CONST on status read, for event stack.
-#define PPU_ATTRIBUTE_CACHE -19
-#define PPU_XSCROLL_FINE -18
-#define PPU_YSCROLL_FINE -17
-#define PPU_XSCROLL_ROUGH -16   ;PPU_XSCROLL with fine adjustments shifted out.
-#define PPU_SUBCYCLE -15    ;0, 1, or 2.
-#define PPU_V -14           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)
+#define PPU_ATTRIBUTE_CACHE -20
+#define PPU_XSCROLL_FINE -19
+#define PPU_YSCROLL_FINE -18
+#define PPU_XSCROLL_ROUGH -17   ;PPU_XSCROLL with fine adjustments shifted out.
+#define PPU_SUBCYCLE -16    ;0, 1, or 2.
+#define PPU_V -15           ;USED TO STORE VRAM ADDRESS (PPU ADDRESS SPACE)
+#define PPU_W_RESET -13     ;Write WREG_CONST on status read, for event stack.
 #define PPU_W -12           ;INTERNAL W REGISTER FOR HIGH/LOW BYTE PORT WRITES
 #define PPU_FRAMECOUNT -11  ;USED FOR EVEN/ODD
 #define PPU_NAMETABLE_PTR -10   ;Pointer cache

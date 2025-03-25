@@ -117,11 +117,18 @@ _:  inc hl
     ex  de,hl
     ; Does current state match current position on tester?
     ;file format: for each sample, .db timelsb,timemsb,flags
-    ld  c,(hl)
+    ld  c,(hl)  ;timing lsb
     inc hl
-    ld  b,(hl)
+    ld  b,(hl)  ;timing msb
     inc hl
-    ld  a,(hl)
+    ld  a,(hl)  ;status flag reg
+    inc hl
+    ld  e,(hl)  ;reg A
+    inc hl
+    ld  d,(hl)  ;reg X
+    inc hl
+    ld  (+_+1),de   ;SMC for later tests
+    ld  e,(hl)  ;reg Y
     inc hl
     ld  (a6502_nestest_tester_curaddress),hl
     push iy
@@ -131,6 +138,16 @@ _:  inc hl
     jr  nz,a6502_nestest_verify_timing_failed
     cp  a,(ix+REGSR)
     jr  nz,a6502_nestest_verify_flags_failed
+    ld  a,e
+    cp  a,(ix+REGY)
+    jr  nz,a6502_nestest_verify_regy_failed
+_:  ld  de,0
+    ld  a,d
+    cp  a,(ix+REGX)
+    jr  nz,a6502_nestest_verify_regx_failed
+    ld  a,e
+    cp  a,(ix+REGA)
+    jr  nz,a6502_nestest_verify_rega_failed
 #if AUTONESTEST_SHOW > 0
 _:  call setFullScreenMode
     ld  hl,-_
@@ -154,6 +171,15 @@ a6502_nestest_verify_timing_failed:
     jr  a6502_nestest_ending_collect
 a6502_nestest_verify_flags_failed:
     ld  hl,a6502_nestest_string_flags_failed
+    jr  a6502_nestest_ending_collect
+a6502_nestest_verify_rega_failed:
+    ld  hl,a6502_nestest_string_rega_failed
+    jr  a6502_nestest_ending_collect
+a6502_nestest_verify_regx_failed:
+    ld  hl,a6502_nestest_string_regx_failed
+    jr  a6502_nestest_ending_collect
+a6502_nestest_verify_regy_failed:
+    ld  hl,a6502_nestest_string_regy_failed
     jr  a6502_nestest_ending_collect
 
 a6502_nestest_ending_collect:
@@ -314,6 +340,10 @@ a6502_nestest_string_timing_failed:
 .db "CPU Timing mismatch detected.",0
 a6502_nestest_string_flags_failed:
 .db "CPU Flags mismatch detected.",0
-
-
+a6502_nestest_string_rega_failed:
+.db "CPU Register A mismatch detected.",0
+a6502_nestest_string_regx_failed:
+.db "CPU Register X mismatch detected.",0
+a6502_nestest_string_regy_failed:
+.db "CPU Register Y mismatch detected.",0
 #endif

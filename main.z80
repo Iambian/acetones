@@ -416,6 +416,15 @@ _:  ld  ix,$F00000
     ld  ix,$F00000
     res 0,(ix+$2C)      ;Disable ON latch
     ld  (ix+$28),1      ;If latch was set, clear it.
+    ld  a,(ix+0)
+    ld  (ix+8),a        ;acknowledge interrupts
+    ld  ix,$F50000
+    ld  a,(ix+8)
+    or  a,7
+    ld  (ix+8),a        ;acknowledge any interrupts
+    ld  b,0
+    djnz $
+
 
 ;    nop
     call waituntilnewkeypress
@@ -890,9 +899,8 @@ mapper0_ppu_read:
     jr  z,mapper0_ppu_read_ppustatus
     ;We should ignore reads from write-only registers but i'm sure nothing
     ;will come of allowing it.
-_:  lea hl,ix+PPU_CTRL
-    ld  a,l
-    add a,c
+    lea hl,ix+PPU_CTRL
+    add a,l
     ld  l,a
     ld  a,(hl)  
     ret
@@ -909,7 +917,7 @@ mapper0_ppu_read_ppustatus:
     ;reading ppustatus does additional things.
     ld  a,WREG_CONST
     ld  (ix+PPU_W),a
-    ld  (ix+PPU_W_RESET),a
+    ;ld  (ix+PPU_W_RESET),a
     lea hl,ix+PPU_STATUS
     ld  a,(hl)
     res PPU_STATUS_VBLANK_TRIGGERED,(hl)
@@ -920,15 +928,19 @@ mapper0_ppu_read_ppudata:
     ld  b,a
     cp  a,$20
     jr  nc,+_   ;skip reading from CHR_ROM
+    ld  e,c
     ld  hl,(chr_rom_curbank)
     ld  c,(ix+PPU_V+0)
-    add.s hl,bc
+    inc bc
+    dec.s bc    ;clear out BCU
+    add hl,bc
     ld  a,(ix+PPU_DATA) ;following dance simulates delayed buffer read
     ld  b,(hl)
     ld  (ix+PPU_DATA),b
+    ld  c,e
     ret
 _:  cp  a,$3F
-    jr  nz,+_
+    jr  nz,++_   ;read nametable data if nz, else read ppu palette data
     ld  a,(ix+PPU_V+0)
     tst a,%00001111
     jr  nz,+_
@@ -936,6 +948,7 @@ _:  cp  a,$3F
 _:  and a,%00011111
     ld  hl,vram_palette
     ld  L,a
+    jr +++_
     ld  a,(hl)
     ret
 _:  and a,%00001100     ;%00ZZTTaa Z:00,01=CHR,02=NT,03=PAL; T:WhichNT; a:adrHI
@@ -979,7 +992,7 @@ _:  cp  a,$40
 mapper0_apu_write:
     ld  a,c
     cp  a,IO_CONTROLLER1_ADR
-    jr  nz,+_
+    jr  nz,mapper0_apu_write_oam_dma_check
     ld  a,(ix+APU_KEYLATCH)
     xor a,b     ;Bit 0 is set if we're trying to change controller poll state.
     rrca        ;And this is how we're going to get it.
@@ -1001,40 +1014,13 @@ mapper0_apu_stop_keyboard:
     xor a,c
     and a,%11110000
     xor a,c     ;keymapping has changed. We need to further alter it.
-    ;===========================================================================
-    ;
-    ; TODO: CHANGE BELOW TO USE PAGE-ALIGNED LOOKUP TABLE TO ACCELERATE THIS.
-    ; NOTE: The algorithm below works perfectly. Is suitable for LUT generation
-    ;
-    ;===========================================================================
-    ;
-    ;[DE MO 2N Y= UP RI LE DO] maps to [SE, B, A, ST, UP, RI, LE, DO]
-    ;The above must be rearranged to become:
-    ;            [RI, LE, DO, UP, ST, SE, B , A ]
-    ;as compared to
-    ;            [SE, B , A , ST, UP, RI, LE, DO]
-    rlca        ;[B , A , ST, UP, RI, LE, DO, SE]
-    ld  c,a     ;b4  : UP is in correct position.
-    rlca        ;[A , ST, UP, RI, LE, DO, SE, B ]
-    rlca        ;[ST, UP, RI, LE, DO, SE, B , A ]
-    ld  b,a     ;b0-2:SE, B , and A are in the correct position
-    rlca        ;[UP, RI, LE, DO, SE, B , A , ST]
-    rlca        ;[RI, LE, DO, SE, B , A , ST, UP]
-    ld  d,a     ;b5-7: RI LE DO in correct position.
-    rlca        ;[LE, DO, SE, B , A , ST, UP, RI]
-    rlca        ;b3: ST is in the correct position.
-    xor a,c     ;
-    and a,%00001000 ;keep A3, merge others
-    xor a,c     ;Has: A3. Merge-in contains b4
-    xor a,b     ;
-    and a,%00011000 ;keep A3-4
-    xor a,b     ;Merge-in contains b0-2
-    xor a,d     ;
-    and a,%00011111 ;keep A0-4
-    xor a,d     ;Merge-in contains b5-7. Is complete.
+    ld  hl,keyboardLUT
+    ld  L,a
+    ld  a,(hl)
     ld  (ix+APU_KEYPAD),a
     ret
-_:  cp  a,APU_OAMDMA_ADR
+mapper0_apu_write_oam_dma_check:
+    cp  a,APU_OAMDMA_ADR
     jr  nz,+_
     ld  a,b
     ld  c,BASETABLE_STRIDE
@@ -1062,23 +1048,29 @@ mapper0_ppu_write_stack:
     ld  a,c
     and a,%00000111
     ld  c,a
+    cp  a,PPU_MASK_ADR
+    jr  z,mapper0_ppu_write_stack_cache
     cp  a,PPU_CTRL_ADR
-    jr  nz,+_
-    ld  (core_memory_ix+PPU_CTRL),a     ;write AND cache writes to CTRL_ADR
-_:  cp  a,PPU_ADDR_ADR
-    jr  z,+_
+    jr  z,mapper0_ppu_write_stack_cache
     cp  a,PPU_SCROLL_ADR
-    jr  nz,++_
-_:  ld  a,(ix+PPU_W_RESET)
-    rlca
-    jr  nc,+_
-    ld  (ix+PPU_W_RESET),a
-    ld  d,c
-    ld  c,a ;bit7 will be set if there was a reset
-    push.s iy   ;B is junk. C bit 7 being set indicates that a W register
-    push.s bc   ;reset happened between pushed data/scroll writes.
-    ld  c,d
-_:  push.s iy
+    jr  nz,mapper0_ppu_write_ports_skip_mask
+    ;Cached write is SCROLL. Compare PPU_W with PPU_W_RESET to
+    ;detect mismatch. If mismatch, push new value of PPU_W to stack to indicate
+    ;a changed-in-the-meantime value, then set PPU_W_RESET to PPU_W
+    ld  hl,(ix+PPU_W_RESET) ;L=reset, H=actual
+    ld  a,l
+    cp  a,h
+    jr  z,+_
+    ld  l,h
+    add hl,hl
+    ld.s (ix+PPU_W_RESET),hl
+    scf
+    sbc a,a     ;Sets sign flag (F:7). This will become important
+    ld  a,L
+    push.s iy
+    push.s af   ;A is new value of PPU_W, 7th bit of F is set to ID this.
+mapper0_ppu_write_stack_cache:
+    push.s iy
     push.s bc
     ret
 
@@ -1086,9 +1078,12 @@ mapper0_ppu_write_ports:
     ld  a,c
     and a,%00000111
     ld  c,a
+mapper0_ppu_write_ports_skip_mask:
     add a,(core_memory_ix+PPU_CTRL)&$FF
     ld  L,a
     ld  a,c
+    or  a,a
+    jr  z,mapper0_ppu_write_ctrl_nmi_check
     cp  a,$02
     ret z   ;read-only register. do not write to it.
     cp  a,$04
@@ -1103,6 +1098,17 @@ mapper0_ppu_write_ports:
 ;Fallthrough: Registers CTRL(0), MASK(1), and OAMADDR(3)
 mapper0_ppu_regwrite:
     ld  (hl),b
+    ret
+
+mapper0_ppu_write_ctrl_nmi_check:
+    ld  a,(hl)
+    ld  (hl),b
+    xor a,b     ;R0^R0'
+    and a,b     ;But only set bit 7 if transitioning to high.
+    inc hl
+    inc hl
+    and a,(hl)  ;Bit 7 remains set only if turning on NMI
+    jp m,a6502_nmi_remote_trigger
     ret
 
 ;register OAMDATA(4)

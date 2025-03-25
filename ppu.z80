@@ -2243,7 +2243,7 @@ _:      cp  a,PPU_SCROLL_ADR
 _:      ld  (ix+PPU_XSCROLL),d
 _:      add a,a
         jr  nc,+_
-        ld  (ix+PPU_W),WREG_CONST
+        ld  (ix+PPU_W),d
 _:
         lea iy,iy-4
         cpi     ;using this solely for loop checking using BC
@@ -2336,6 +2336,8 @@ ppu_gate_out_ppu:
     ld  a,(ppu_smc_gate_stack)
     ld  (hl),a
     ld.s sp,EVENT_STACK_S
+    ld  a,(ix+PPU_W)
+    ld  (ix+PPU_W_RESET),a
     ret
 
 
