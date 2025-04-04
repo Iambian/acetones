@@ -9,7 +9,7 @@
 ;Rebuild with this set to 1 in order to perform a headless test,
 ;printing either a success message, or a list of instructions leading
 ;up to failure againt a logfile of a predetermined name.
-#define AUTONESTEST 1
+#define AUTONESTEST 0
 #define NESTEST_BRKPT $0
 #define AUTONESTEST_SHOW 0
 

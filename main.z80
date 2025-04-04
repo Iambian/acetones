@@ -860,18 +860,16 @@ _:  ld  de,(hl)
 
 mapper0_read:
     ld  a,d
-    add a,a
-    jr  nc,+_
-    ld  a,(hl)  ;is $8000 or above
+    cp  a,$20
+    jr  nc,++_
+_:  ld  a,(hl)  ;is below $2000. Read from RAM. Or...
     ret
-_:  cp  a,$20*2
-    jr  nc,+_
-    ld  a,(hl)  ;is below $2000
-    ret
-_:  add a,a
-    jr  nc,mapper0_ppu_read     ;wasn't $4000 or higher.
-    jr  z,mapper0_apu_read      ;high byte was exactly $40
-    ld  a,(hl)
+_:  cp  a,$80
+    jr  nc,--_  ;is at or above $8000. Also read from that.
+    cp  a,$40
+    jr  z,mapper0_apu_read  ;Is exactly $4000. read from APU.
+    jr  c,mapper0_ppu_read  ;But read from PPU if less than that.
+    ld  a,(hl)              ;Otherwise, is in $4100-$7FFF range. Read it.
     ret
 mapper0_apu_read:
     ld  a,c
@@ -980,13 +978,13 @@ mapper0_write:
     ld  a,d
     cp  a,$20
     jr  nc,+_
-    ld  (hl),b
+    ld  (hl),b  ;data being written is inside RAM area
     ret
 _:  cp  a,$40
-    jr  c,mapper0_ppu_write
-    jr  z,mapper0_apu_write
+    jr  c,mapper0_ppu_write     ;If below $40, then write to PPU
+    jr  z,mapper0_apu_write     ;But if exactly that, then write to APU
     add a,a
-    ret c       ;don't write anything to above $8000
+    ret c       ;don't write anything to at or above $8000
     ld  (hl),b  ;but allow it in $4100-$7FFF because it might be RAM.
     ret
 mapper0_apu_write:

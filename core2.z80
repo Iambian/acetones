@@ -194,7 +194,9 @@ a6502_getInstruction:
     #endif
     ;Fetch instruction, then advance PC
     ld  a,(hl)
-    ;cp  a,$FC   \   jr z,$
+    ;*** DEBUG SECTION -- STOP EXECUTION WHEN A SPECIFIC OPCODE IS FOUND
+    ;cp  a,$4C   \   jr z,$
+    ;*** END DEBUG SECTION
     inc hl
     inc e
     jr  z,a6502_nextargfetch_pagecross
@@ -232,6 +234,8 @@ a6502_int_take:
         add hl,hl
         jp  c,a6502_int_cancel_take
         exx
+        ;NOTE: No need to roll back PC. That's being done at the tail end of
+        ;the interrupt handler where it jumps to i6502RetryFirstLoad.
         ld  (ix+REGPC+0),e
         ld  hl,flagsZ80to6502LUT
         ex  af,af'
@@ -263,32 +267,28 @@ a6502_int_take:
 ;been executed at this point so the only thing left to do is handle registers
 ;and memory as though the port write has completed.
 
-;TODO: Simply skipping the end of the port write is not possible since
-;       additional code may need to run (i.e. second half of an illegal oper).
-;       YOU SHOULD DEVISE A WAY TO DEFER THIS OPERATION UNTIL THE END BUT
-;       BEFORE EXECUTION RETURNS TO THE MAIN LOOP.
 a6502_nmi_remote_trigger:
-    ;Cripes. This is gonna be a bit more difficult than expected.
-    ;The code that may need to be written might not actually go here.
-    ;Keep examining the mapper subroutines currently in main.z80 and maybe
-    ;you'll find a solution there.
-
-    ;NEW PLAN! but the old plan will still be there for reference.
-    ;If an interrupt triggers, overwrite the four bytes at
-    ;`a6502_int_jumpstart` to be equivalent to 'jp a6502_nmi_remote_trigger'
-    ;which means modifying the actual instruction at that label.
-    ;Upon jumping to that location, the changes are reverted and the NMI
-    ;routine is called in a manner consistent with NMI execution. See BRK.
     ;JP = $C3; JP C = $DA
     ld  hl,a6502_int_jumpstart
-    ld  de,a6502_int_take
-    ld  (hl),$C3
+    ld  de,a6502_unconditional_nmi_trigger
+    ld  (hl),$C3    ;JP
     inc hl
     ld  (hl),de
-
-    ;BRK-like routine goes here for the NMI.
-
     ret
+
+a6502_unconditional_nmi_trigger:
+    ;Return interrupt handler to the way it was before.
+    ld  hl,a6502_int_jumpstart
+    ld  de,a6502_int_take
+    ld  (hl),$DA    ;JP C
+    inc hl
+    ld  (hl),de
+    ;BRK-like routine goes here for the NMI.
+    ld  a,$FF
+    ld  (ix+NMI_TRIGGERED),a
+    ;Whatever happens here is the alternate destination to i6502RetryFirstLoad,
+    ;which rolls back PC to the prior instruction for us.
+    jp  inst6502_brk_from_handler
 
 
 ;##############################################################################
@@ -727,6 +727,10 @@ _:  exx
     ld  b,0
     ld  c,e
     add hl,bc
+    ;sbc hl,hl
+    ;ld  (ix+REGA),0
+    ;ld  bc,$FF
+    ;ld  de,$FF
     ret                     ;D=MSB, C=LSB, HL=address
 
 a6502_adrmode_read_absx:
